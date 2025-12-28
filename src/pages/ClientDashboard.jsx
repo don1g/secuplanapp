@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Mail, Filter, MapPin, ArrowLeft, Loader2, User, Save, Phone, Upload, X, Trash2 } from 'lucide-react'; // X importieren
+import { Search, Mail, Filter, MapPin, ArrowLeft, Loader2, User, Save, Phone, Upload, X, Trash2 } from 'lucide-react';
 import { collection, query, where, getDocs, doc, updateDoc, deleteField } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, auth, storage } from '../firebase';
@@ -20,7 +20,7 @@ export const ClientDashboard = ({ onLogout }) => {
 
   // Profil Edit States
   const [isEditing, setIsEditing] = useState(false);
-  const [showImageModal, setShowImageModal] = useState(false); // NEU
+  const [showImageModal, setShowImageModal] = useState(false);
   const [profileData, setProfileData] = useState({
       name: auth.currentUser?.displayName || "",
       phone: "",
@@ -91,18 +91,24 @@ export const ClientDashboard = ({ onLogout }) => {
       setLoading(false);
   };
 
-const handleDeleteImage = async () => {
-      if (!confirm("Profilbild löschen?")) return;
+  // --- BILD LÖSCHEN (Korrigiert) ---
+  const handleDeleteImage = async (e) => {
+      if(e) e.stopPropagation(); // Verhindert Klicks auf darunterliegende Elemente
+      if (!auth.currentUser) return;
+      if (!confirm("Profilbild wirklich löschen?")) return;
+      
+      setLoading(true);
       try {
           // Löscht das Feld 'imageUrl' aus der Datenbank
-          await updateDoc(doc(db, "users", currentUser.uid), { imageUrl: deleteField() });
-          alert("Gelöscht!");
+          await updateDoc(doc(db, "users", auth.currentUser.uid), { imageUrl: deleteField() });
+          alert("Bild gelöscht!");
           window.location.reload(); 
       } catch (e) {
           console.error(e);
+          alert("Fehler beim Löschen.");
       }
+      setLoading(false);
   };
-
 
   const filteredFirms = firms.filter(f => 
     !searchTerm || f.name.toLowerCase().includes(searchTerm.toLowerCase()) || f.description?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -206,29 +212,31 @@ const handleDeleteImage = async () => {
       {view === 'profile' && (
           <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in">
               <Card className="p-6 flex flex-col md:flex-row items-center gap-6">
-                  {/* LOGIK GEÄNDERT */}
+                  
                   <div className="relative group">
                       <div onClick={() => !isEditing && setShowImageModal(true)} className={!isEditing ? "cursor-zoom-in hover:opacity-90 transition-opacity" : ""}>
                           <Avatar src={auth.currentUser?.photoURL} alt={profileData.name} size="xl" className="shadow-lg"/>
                       </div>
                       
                       {/* Upload & Löschen Overlay (Nur wenn isEditing) */}
-                  {isEditing && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-xl gap-4 animate-in fade-in">
-                          
-                          {/* 1. Upload Knopf (Linkes Icon) */}
-                          <label className="cursor-pointer text-white hover:text-blue-200" title="Neues Bild hochladen">
-                              <Upload size={24}/> 
-                              <input type="file" className="hidden" onChange={handleImageUpload}/>
-                          </label>
+                      {isEditing && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-xl gap-4 animate-in fade-in">
+                              
+                              {/* 1. Upload Knopf */}
+                              <label className="cursor-pointer text-white hover:text-blue-200" title="Neues Bild hochladen">
+                                  <Upload size={24}/> 
+                                  <input type="file" className="hidden" onChange={handleImageUpload}/>
+                              </label>
 
-                          {/* 2. Löschen Knopf (Rechtes Icon) */}
-                          <button onClick={handleDeleteImage} className="text-white hover:text-red-500 cursor-pointer" title="Bild löschen">
-                              <Trash2 size={24}/>
-                          </button>
-                          
-                      </div>
-                  )}
+                              {/* 2. Löschen Knopf */}
+                              {auth.currentUser?.photoURL && (
+                                <button onClick={handleDeleteImage} className="text-white hover:text-red-500 cursor-pointer" title="Bild löschen">
+                                    <Trash2 size={24}/>
+                                </button>
+                              )}
+                              
+                          </div>
+                      )}
                   </div>
 
                   <div className="text-center md:text-left flex-1">
@@ -287,7 +295,7 @@ const handleDeleteImage = async () => {
           </div>
       )}
 
-      {/* NEU: BILD MODAL */}
+      {/* BILD MODAL */}
       {showImageModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4 animate-in fade-in" onClick={() => setShowImageModal(false)}>
             <div className="relative max-w-4xl w-full h-full flex items-center justify-center">

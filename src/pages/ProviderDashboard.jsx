@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, CalendarDays, Users, Mail, Plus, MapPin, CheckCircle2, FileText, Settings, Upload, Loader2, X } from 'lucide-react'; // X hinzugefügt
-import { collection, getDocs, getDoc, setDoc, doc, addDoc, updateDoc, query, onSnapshot } from 'firebase/firestore';
+import { LayoutDashboard, CalendarDays, Users, Mail, Plus, MapPin, CheckCircle2, FileText, Settings, Upload, Loader2, X, Trash2 } from 'lucide-react'; 
+import { collection, getDocs, getDoc, setDoc, doc, addDoc, updateDoc, query, onSnapshot, deleteField } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { EMP_ROLES } from '../utils/constants';
@@ -21,7 +21,7 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
   
   // States für Bearbeitung & Bild
   const [isEditing, setIsEditing] = useState(false);
-  const [showImageModal, setShowImageModal] = useState(false); // NEU
+  const [showImageModal, setShowImageModal] = useState(false);
   
   const [posts, setPosts] = useState([]);
   const [newPostContent, setNewPostContent] = useState('');
@@ -72,6 +72,21 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
       } 
       await setDoc(doc(db, "companies", user.uid), { ...data, imageUrl: url }, { merge: true }); 
       setImageUpload(null); setUploading(false); setIsEditing(false); 
+  };
+
+  // --- NEU: BILD LÖSCHEN ---
+  const handleDeleteImage = async (e) => {
+    e.stopPropagation(); // Verhindert dass das Bild-Modal aufgeht
+    if (!confirm("Firmenlogo wirklich löschen?")) return;
+    setUploading(true);
+    try {
+        await updateDoc(doc(db, "companies", user.uid), { imageUrl: deleteField() });
+        // Wir setzen das Bild im State null, damit es sofort weg ist
+        setData(prev => ({ ...prev, imageUrl: null }));
+        setImageUpload(null);
+        alert("Logo entfernt!");
+    } catch(err) { console.error(err); }
+    setUploading(false);
   };
 
   const handleInvite = async () => {
@@ -128,7 +143,7 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
                 {/* Logo Area */}
                 <div className="relative px-8 pb-8">
                     <div className="absolute -top-12 left-8 p-1 bg-white rounded-2xl shadow-md border border-slate-200 group/logo">
-                        {/* HIER GEÄNDERT: Bild in Container gepackt für Klick-Logik */}
+                        {/* Bild Container */}
                         <div className="h-24 w-24 rounded-xl overflow-hidden bg-slate-100 flex items-center justify-center relative">
                             <div 
                                 onClick={() => !isEditing && setShowImageModal(true)} 
@@ -137,12 +152,24 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
                                 {imageUpload ? <img src={URL.createObjectURL(imageUpload)} className="h-full w-full object-cover opacity-50"/> : <Avatar src={data.imageUrl} alt={data.name} size="full" className="w-full h-full rounded-none"/>}
                             </div>
                             
-                            {/* Upload Button nur wenn isEditing */}
+                            {/* Upload & Löschen Buttons (Nur wenn isEditing) */}
                             {isEditing && (
-                                <label className="absolute inset-0 flex items-center justify-center bg-black/40 cursor-pointer text-white animate-in fade-in">
-                                    <Upload size={24}/>
-                                    <input type="file" className="hidden" onChange={(e) => setImageUpload(e.target.files[0])} />
-                                </label>
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/40 gap-4 animate-in fade-in rounded-xl">
+                                    
+                                    {/* Upload Button */}
+                                    <label className="cursor-pointer text-white hover:text-blue-200 transition-colors" title="Neues Bild">
+                                        <Upload size={24}/>
+                                        <input type="file" className="hidden" onChange={(e) => setImageUpload(e.target.files[0])} />
+                                    </label>
+
+                                    {/* Löschen Button (Nur wenn ein Bild existiert) */}
+                                    {(data.imageUrl || imageUpload) && (
+                                        <button onClick={handleDeleteImage} className="text-white hover:text-red-500 transition-colors" title="Logo löschen">
+                                            <Trash2 size={24}/>
+                                        </button>
+                                    )}
+
+                                </div>
                             )}
                         </div>
                     </div>
