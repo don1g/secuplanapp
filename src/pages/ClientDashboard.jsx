@@ -185,7 +185,7 @@ export const ClientDashboard = ({ onLogout }) => {
                     <div>
                         <h3 className="font-bold text-slate-900 mb-4">Neuigkeiten</h3>
                         {firmPosts.length > 0 ? (
-                            firmPosts.map(p => <PostItem key={p.id} post={p} companyId={selectedFirm.id} />)
+                            firmPosts.map(p => <PostItem key={p.id} post={p} companyId={selectedFirm.id} currentUserId={auth.currentUser?.uid} />)
                         ) : <div className="text-slate-400 italic">Keine Beiträge.</div>}
                     </div>
                 </div>
