@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, CalendarDays, Users, Mail, Plus, MapPin, CheckCircle2, FileText, Settings, Upload, Loader2, X, Trash2 } from 'lucide-react'; 
-import { collection, getDocs, getDoc, setDoc, doc, addDoc, updateDoc, query, onSnapshot, deleteField } from 'firebase/firestore';
+import { LayoutDashboard, CalendarDays, Users, Mail, Plus, MapPin, CheckCircle2, FileText, Settings, Upload, Loader2, X, Trash2, LayoutGrid, Search, Filter, ArrowLeft } from 'lucide-react'; // Neue Icons importiert
+import { collection, getDocs, setDoc, doc, addDoc, updateDoc, query, onSnapshot, deleteField, where } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { EMP_ROLES } from '../utils/constants';
@@ -31,7 +31,15 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
   
   const [internalProfileId, setInternalProfileId] = useState(null);
 
+  // --- NEU: Marktplatz States ---
+  const [firms, setFirms] = useState([]);
+  const [selectedFirm, setSelectedFirm] = useState(null);
+  const [firmPosts, setFirmPosts] = useState([]);
+  const [marketLoading, setMarketLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+
   useEffect(() => {
+    // Echtzeit-Daten der EIGENEN Firma
     const unsubComp = onSnapshot(doc(db, "companies", user.uid), (doc) => { setData(doc.data()); });
     const unsubEmp = onSnapshot(collection(db, "companies", user.uid, "employees"), (snap) => {
         setEmployees(snap.docs.map(d => ({id: d.id, ...d.data()})));
@@ -43,10 +51,33 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
     const unsubReq = onSnapshot(collection(db, "companies", user.uid, "requests"), (snap) => {
         setRequests(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
+
+    // NEU: Marktplatz Firmen laden (einmalig oder bei Bedarf)
+    const loadMarketplace = async () => {
+        setMarketLoading(true);
+        const q = query(collection(db, "companies"), where("isVisible", "==", true));
+        const snap = await getDocs(q);
+        setFirms(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setMarketLoading(false);
+    };
+    loadMarketplace();
+
     return () => { unsubComp(); unsubEmp(); unsubPosts(); unsubReq(); };
   }, [user]);
 
   useEffect(() => { setTab(initialTab); }, [initialTab]);
+
+  // Wenn man im Marktplatz eine Firma anklickt, deren Posts laden
+  useEffect(() => {
+    if (selectedFirm) {
+        const loadPosts = async () => {
+            const q = query(collection(db, "companies", selectedFirm.id, "posts"));
+            const snap = await getDocs(q);
+            setFirmPosts(snap.docs.map(d => ({id: d.id, ...d.data()})));
+        };
+        loadPosts();
+    }
+  }, [selectedFirm]);
 
   const handleViewProfile = (id) => {
       if (onViewProfile) {
@@ -74,14 +105,12 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
       setImageUpload(null); setUploading(false); setIsEditing(false); 
   };
 
-  // --- NEU: BILD LÖSCHEN ---
   const handleDeleteImage = async (e) => {
-    e.stopPropagation(); // Verhindert dass das Bild-Modal aufgeht
+    e.stopPropagation();
     if (!confirm("Firmenlogo wirklich löschen?")) return;
     setUploading(true);
     try {
         await updateDoc(doc(db, "companies", user.uid), { imageUrl: deleteField() });
-        // Wir setzen das Bild im State null, damit es sofort weg ist
         setData(prev => ({ ...prev, imageUrl: null }));
         setImageUpload(null);
         alert("Logo entfernt!");
@@ -102,8 +131,13 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
       await updateDoc(doc(db, "companies", user.uid, "requests", reqId), { status: newStatus });
   };
 
+  const filteredFirms = firms.filter(f => 
+    !searchTerm || f.name.toLowerCase().includes(searchTerm.toLowerCase()) || f.description?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   const menu = [
     { id: 'dashboard', name: 'Mein Profil', icon: <LayoutDashboard size={20}/> },
+    { id: 'marketplace', name: 'Marktplatz', icon: <LayoutGrid size={20}/> }, // NEU
     { id: 'schedule', name: 'Dienstplan', icon: <CalendarDays size={20}/> },
     { id: 'staff', name: 'Personal', icon: <Users size={20}/> },
     { id: 'req_manage', name: 'Anträge', icon: <CheckCircle2 size={20}/> },
@@ -121,7 +155,7 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
   }
 
   return (
-    <DashboardLayout title="Firmen Verwaltung" user={{...user, ...data}} sidebarItems={menu} activeTab={tab} onTabChange={setTab} onLogout={onLogout}>
+    <DashboardLayout title="Firmen Verwaltung" user={{...user, ...data}} sidebarItems={menu} activeTab={tab} onTabChange={(t) => {setTab(t); setSelectedFirm(null);}} onLogout={onLogout}>
       
       {tab === 'dashboard' && (
         <div className="space-y-6 animate-in fade-in">
@@ -143,32 +177,14 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
                 {/* Logo Area */}
                 <div className="relative px-8 pb-8">
                     <div className="absolute -top-12 left-8 p-1 bg-white rounded-2xl shadow-md border border-slate-200 group/logo">
-                        {/* Bild Container */}
                         <div className="h-24 w-24 rounded-xl overflow-hidden bg-slate-100 flex items-center justify-center relative">
-                            <div 
-                                onClick={() => !isEditing && setShowImageModal(true)} 
-                                className={`w-full h-full ${!isEditing ? 'cursor-zoom-in' : ''}`}
-                            >
+                            <div onClick={() => !isEditing && setShowImageModal(true)} className={`w-full h-full ${!isEditing ? 'cursor-zoom-in' : ''}`}>
                                 {imageUpload ? <img src={URL.createObjectURL(imageUpload)} className="h-full w-full object-cover opacity-50"/> : <Avatar src={data.imageUrl} alt={data.name} size="full" className="w-full h-full rounded-none"/>}
                             </div>
-                            
-                            {/* Upload & Löschen Buttons (Nur wenn isEditing) */}
                             {isEditing && (
                                 <div className="absolute inset-0 flex items-center justify-center bg-black/40 gap-4 animate-in fade-in rounded-xl">
-                                    
-                                    {/* Upload Button */}
-                                    <label className="cursor-pointer text-white hover:text-blue-200 transition-colors" title="Neues Bild">
-                                        <Upload size={24}/>
-                                        <input type="file" className="hidden" onChange={(e) => setImageUpload(e.target.files[0])} />
-                                    </label>
-
-                                    {/* Löschen Button (Nur wenn ein Bild existiert) */}
-                                    {(data.imageUrl || imageUpload) && (
-                                        <button onClick={handleDeleteImage} className="text-white hover:text-red-500 transition-colors" title="Logo löschen">
-                                            <Trash2 size={24}/>
-                                        </button>
-                                    )}
-
+                                    <label className="cursor-pointer text-white hover:text-blue-200 transition-colors" title="Neues Bild"><Upload size={24}/><input type="file" className="hidden" onChange={(e) => setImageUpload(e.target.files[0])} /></label>
+                                    {(data.imageUrl || imageUpload) && (<button onClick={handleDeleteImage} className="text-white hover:text-red-500 transition-colors" title="Logo löschen"><Trash2 size={24}/></button>)}
                                 </div>
                             )}
                         </div>
@@ -228,6 +244,64 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
         </div>
       )}
 
+      {/* NEU: MARKTPLATZ VIEW */}
+      {tab === 'marketplace' && !selectedFirm && (
+        <div className="space-y-4 animate-in fade-in">
+          <div className="flex gap-2">
+            <div className="flex-1 relative">
+                <Search className="absolute left-3 top-3 text-slate-400" size={18}/>
+                <input className="w-full pl-10 p-3 rounded-xl border border-slate-200 outline-none focus:border-blue-500" placeholder="Firma suchen..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}/>
+            </div>
+            <Button icon={Filter} variant="outline">Filter</Button>
+          </div>
+          
+          {marketLoading ? <div className="flex justify-center p-10"><Loader2 className="animate-spin text-blue-600"/></div> : (
+            <div className="space-y-4">
+                {filteredFirms.map(f => (
+                <Card key={f.id} onClick={() => setSelectedFirm(f)} className="p-4 flex gap-4 cursor-pointer hover:border-blue-400 transition-all">
+                    <Avatar src={f.imageUrl} alt={f.name} size="lg" />
+                    <div>
+                        <h3 className="font-bold text-lg text-slate-900">{f.name} {f.id === user.uid && <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full ml-2">(Du)</span>}</h3>
+                        <div className="text-sm text-slate-500 flex gap-2 mb-2 items-center"><MapPin size={14}/> {f.address || "Keine Adresse"}</div>
+                        <div className="text-blue-600 font-bold bg-blue-50 inline-block px-2 py-0.5 rounded text-sm">{f.showPrice !== false ? `ab ${f.price}€ / Std` : 'Preis auf Anfrage'}</div>
+                    </div>
+                </Card>
+                ))}
+                {filteredFirms.length === 0 && <div className="text-center text-slate-400 py-10">Keine Firmen gefunden.</div>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* NEU: MARKTPLATZ DETAILS VIEW */}
+      {tab === 'marketplace' && selectedFirm && (
+        <div className="space-y-6 animate-in fade-in">
+          <Button variant="ghost" onClick={() => setSelectedFirm(null)} icon={ArrowLeft} size="sm">Zurück zum Marktplatz</Button>
+          <Card className="overflow-hidden">
+            <div className="h-32 bg-gradient-to-r from-blue-600 to-blue-400"></div>
+            <div className="px-8 pb-6 -mt-10 flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+              <div className="flex items-end gap-4">
+                  <Avatar src={selectedFirm.imageUrl} alt={selectedFirm.name} size="xl" className="bg-white border-4 border-white shadow-md"/>
+                  <div className="mb-2">
+                      <h1 className="text-2xl font-bold text-slate-900">{selectedFirm.name}</h1>
+                      <p className="text-slate-500 flex items-center gap-1"><MapPin size={14}/> {selectedFirm.address}</p>
+                  </div>
+              </div>
+            </div>
+            <div className="p-8 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div className="md:col-span-2 space-y-6">
+                    <div><h3 className="font-bold text-slate-900 mb-2">Über uns</h3><p className="text-slate-600 leading-relaxed">{selectedFirm.description || "Keine Beschreibung verfügbar."}</p></div>
+                    <div>
+                        <h3 className="font-bold text-slate-900 mb-4">Neuigkeiten</h3>
+                        {firmPosts.length > 0 ? firmPosts.map(p => <PostItem key={p.id} post={p} companyId={selectedFirm.id} currentUserId={user.uid} />) : <div className="text-slate-400 italic">Keine Beiträge.</div>}
+                    </div>
+                </div>
+                <div><Card className="p-4 bg-slate-50 border-slate-200"><div className="text-xs font-bold text-slate-500 uppercase mb-1">Stundensatz</div><div className="text-2xl font-bold text-blue-600 mb-4">{selectedFirm.price}€</div></Card></div>
+            </div>
+          </Card>
+        </div>
+      )}
+
       {tab === 'staff' && (
         <div className="space-y-4">
           <div className="flex justify-end"><Button onClick={handleInvite} icon={Plus}>Mitarbeiter einladen</Button></div>
@@ -269,27 +343,16 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
           </div>
       )}
 
-      {/* Scheduler */}
       {tab === 'schedule' && (
-        <div className="h-[calc(100vh-140px)]">
-            <SchedulePlanner 
-                employees={employees} 
-                companyId={user.uid} 
-                currentUser={user} 
-                onViewProfile={handleViewProfile} 
-            />
-        </div>
+        <div className="h-[calc(100vh-140px)]"><SchedulePlanner employees={employees} companyId={user.uid} currentUser={user} onViewProfile={handleViewProfile} /></div>
       )}
 
       {tab === 'messages' && <div className="h-[calc(100vh-140px)]"><ChatSystem user={user} userRole="provider" isEmbedded={true} /></div>}
 
-      {/* NEU: BILD MODAL (Lightbox) */}
       {showImageModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4 animate-in fade-in" onClick={() => setShowImageModal(false)}>
             <div className="relative max-w-4xl w-full h-full flex items-center justify-center">
-                <button className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white p-2 rounded-full backdrop-blur-sm" onClick={() => setShowImageModal(false)}>
-                    <X size={24} />
-                </button>
+                <button className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white p-2 rounded-full backdrop-blur-sm" onClick={() => setShowImageModal(false)}><X size={24} /></button>
                 <img src={data.imageUrl} alt={data.name} className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
             </div>
         </div>
