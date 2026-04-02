@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, CalendarDays, Users, Mail, Plus, MapPin, CheckCircle2, FileText, Settings, Upload, Loader2, X, Trash2, LayoutGrid, Search, Filter, ArrowLeft } from 'lucide-react'; // Neue Icons importiert
+import { LayoutDashboard, CalendarDays, Users, Mail, Plus, MapPin, CheckCircle2, FileText, Settings, Upload, Loader2, X, Trash2, LayoutGrid, Search, Filter, ArrowLeft } from 'lucide-react';
 import { collection, getDocs, setDoc, doc, addDoc, updateDoc, query, onSnapshot, deleteField, where } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
@@ -18,20 +18,16 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
   const [tab, setTab] = useState(initialTab);
   const [employees, setEmployees] = useState([]);
   const [data, setData] = useState(null);
-  
-  // States für Bearbeitung & Bild
   const [isEditing, setIsEditing] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
-  
   const [posts, setPosts] = useState([]);
   const [newPostContent, setNewPostContent] = useState('');
   const [imageUpload, setImageUpload] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [requests, setRequests] = useState([]);
-  
   const [internalProfileId, setInternalProfileId] = useState(null);
 
-  // --- NEU: Marktplatz States ---
+  // Marktplatz Logik aus GitHub
   const [firms, setFirms] = useState([]);
   const [selectedFirm, setSelectedFirm] = useState(null);
   const [firmPosts, setFirmPosts] = useState([]);
@@ -39,7 +35,6 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
-    // Echtzeit-Daten der EIGENEN Firma
     const unsubComp = onSnapshot(doc(db, "companies", user.uid), (doc) => { setData(doc.data()); });
     const unsubEmp = onSnapshot(collection(db, "companies", user.uid, "employees"), (snap) => {
         setEmployees(snap.docs.map(d => ({id: d.id, ...d.data()})));
@@ -52,7 +47,6 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
         setRequests(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    // NEU: Marktplatz Firmen laden (einmalig oder bei Bedarf)
     const loadMarketplace = async () => {
         setMarketLoading(true);
         const q = query(collection(db, "companies"), where("isVisible", "==", true));
@@ -67,7 +61,6 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
 
   useEffect(() => { setTab(initialTab); }, [initialTab]);
 
-  // Wenn man im Marktplatz eine Firma anklickt, deren Posts laden
   useEffect(() => {
     if (selectedFirm) {
         const loadPosts = async () => {
@@ -80,11 +73,8 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
   }, [selectedFirm]);
 
   const handleViewProfile = (id) => {
-      if (onViewProfile) {
-          onViewProfile(id);
-      } else {
-          setInternalProfileId(id);
-      }
+      if (onViewProfile) onViewProfile(id);
+      else setInternalProfileId(id);
   };
 
   const handleCreatePost = async (e) => { 
@@ -113,7 +103,6 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
         await updateDoc(doc(db, "companies", user.uid), { imageUrl: deleteField() });
         setData(prev => ({ ...prev, imageUrl: null }));
         setImageUpload(null);
-        alert("Logo entfernt!");
     } catch(err) { console.error(err); }
     setUploading(false);
   };
@@ -137,7 +126,7 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
 
   const menu = [
     { id: 'dashboard', name: 'Mein Profil', icon: <LayoutDashboard size={20}/> },
-    { id: 'marketplace', name: 'Marktplatz', icon: <LayoutGrid size={20}/> }, // NEU
+    { id: 'marketplace', name: 'Marktplatz', icon: <LayoutGrid size={20}/> },
     { id: 'schedule', name: 'Dienstplan', icon: <CalendarDays size={20}/> },
     { id: 'staff', name: 'Personal', icon: <Users size={20}/> },
     { id: 'req_manage', name: 'Anträge', icon: <CheckCircle2 size={20}/> },
@@ -148,7 +137,7 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
 
   if (internalProfileId) {
       return (
-          <DashboardLayout title="Mitarbeiter Profil" user={{...user, ...data}} sidebarItems={menu} activeTab={tab} onTabChange={setTab} onLogout={onLogout}>
+          <DashboardLayout title="Profilansicht" user={{...user, ...data}} sidebarItems={menu} activeTab={tab} onTabChange={setTab} onLogout={onLogout}>
               <UserProfileView targetUserId={internalProfileId} onBack={() => setInternalProfileId(null)} />
           </DashboardLayout>
       );
@@ -159,7 +148,6 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
       
       {tab === 'dashboard' && (
         <div className="space-y-6 animate-in fade-in">
-            {/* Banner */}
             <div className={`bg-white rounded-2xl shadow-xl border overflow-hidden relative group ${isEditing ? 'ring-2 ring-blue-500' : 'border-slate-200'}`}>
                 <div className="h-32 bg-gradient-to-r from-blue-600 to-blue-400 relative">
                     <div className="absolute top-4 right-4 z-10 flex gap-2">
@@ -173,8 +161,6 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
                         )}
                     </div>
                 </div>
-                
-                {/* Logo Area */}
                 <div className="relative px-8 pb-8">
                     <div className="absolute -top-12 left-8 p-1 bg-white rounded-2xl shadow-md border border-slate-200 group/logo">
                         <div className="h-24 w-24 rounded-xl overflow-hidden bg-slate-100 flex items-center justify-center relative">
@@ -182,40 +168,34 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
                                 {imageUpload ? <img src={URL.createObjectURL(imageUpload)} className="h-full w-full object-cover opacity-50"/> : <Avatar src={data.imageUrl} alt={data.name} size="full" className="w-full h-full rounded-none"/>}
                             </div>
                             {isEditing && (
-                                <div className="absolute inset-0 flex items-center justify-center bg-black/40 gap-4 animate-in fade-in rounded-xl">
-                                    <label className="cursor-pointer text-white hover:text-blue-200 transition-colors" title="Neues Bild"><Upload size={24}/><input type="file" className="hidden" onChange={(e) => setImageUpload(e.target.files[0])} /></label>
-                                    {(data.imageUrl || imageUpload) && (<button onClick={handleDeleteImage} className="text-white hover:text-red-500 transition-colors" title="Logo löschen"><Trash2 size={24}/></button>)}
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/40 gap-4 animate-in fade-in rounded-xl text-white">
+                                    <label className="cursor-pointer hover:text-blue-200 transition-colors"><Upload size={24}/><input type="file" className="hidden" onChange={(e) => setImageUpload(e.target.files[0])} /></label>
+                                    {(data.imageUrl || imageUpload) && <button onClick={handleDeleteImage} className="hover:text-red-500 transition-colors"><Trash2 size={24}/></button>}
                                 </div>
                             )}
                         </div>
                     </div>
-                    
                     <div className="pt-16 flex flex-col md:flex-row justify-between items-start gap-4">
                         <div className="flex-1 w-full">
-                            {isEditing ? <input type="text" value={data.name} onChange={(e) => setData({...data, name: e.target.value})} className="text-3xl font-bold text-slate-900 mb-1 w-full border-b-2 border-blue-500 outline-none" placeholder="Firmenname" /> : <h1 className="text-3xl font-bold text-slate-900 mb-1">{data.name}</h1>}
+                            {isEditing ? <input type="text" value={data.name} onChange={(e) => setData({...data, name: e.target.value})} className="text-3xl font-bold text-slate-900 mb-1 w-full border-b-2 border-blue-500 outline-none" /> : <h1 className="text-3xl font-bold text-slate-900 mb-1">{data.name}</h1>}
                             <div className="flex flex-wrap gap-4 text-sm text-slate-500 mt-2 items-center">
-                                <div className="flex items-center gap-1"><MapPin size={16}/> {isEditing ? <input value={data.address} onChange={(e) => setData({...data, address: e.target.value})} className="border-b border-blue-300 outline-none" placeholder="Adresse"/> : (data.address || "Keine Adresse")}</div>
+                                <div className="flex items-center gap-1"><MapPin size={16}/> {isEditing ? <input value={data.address} onChange={(e) => setData({...data, address: e.target.value})} className="border-b border-blue-300 outline-none" /> : (data.address || "Keine Adresse")}</div>
                                 <div className="flex items-center gap-1"><Users size={16}/> {employees.length} Mitarbeiter</div>
-                                <div className="flex items-center gap-1"><Mail size={16}/> {isEditing ? <input value={data.publicEmail} onChange={(e) => setData({...data, publicEmail: e.target.value})} className="border-b border-blue-300 outline-none" placeholder="E-Mail"/> : (data.publicEmail || user.email)}</div>
+                                <div className="flex items-center gap-1"><Mail size={16}/> {isEditing ? <input value={data.publicEmail} onChange={(e) => setData({...data, publicEmail: e.target.value})} className="border-b border-blue-300 outline-none" /> : (data.publicEmail || user.email)}</div>
                             </div>
                         </div>
                         <div className="text-right">
-                            <div className="text-2xl font-bold text-blue-600">
-                                {isEditing ? <input type="number" value={data.price} onChange={(e) => setData({...data, price: e.target.value})} className="w-20 text-right border-b border-blue-300 outline-none"/> : data.price}€ <span className="text-sm text-slate-500 font-normal">/ Std.</span>
-                            </div>
-                            <div className={`inline-block mt-1 ${data.isVisible ? 'bg-green-50 text-green-600 border-green-200' : 'bg-slate-100 text-slate-500 border-slate-200'} border text-xs font-bold px-3 py-1 rounded-full`}>
-                                {data.isVisible ? 'Öffentlich sichtbar' : 'Versteckt'}
-                            </div>
+                            <div className="text-2xl font-bold text-blue-600">{isEditing ? <input type="number" value={data.price} onChange={(e) => setData({...data, price: e.target.value})} className="w-20 text-right border-b border-blue-300 outline-none"/> : data.price}€ <span className="text-sm text-slate-500 font-normal">/ Std.</span></div>
+                            <div className={`inline-block mt-1 ${data.isVisible ? 'bg-green-50 text-green-600 border-green-200' : 'bg-slate-100 text-slate-500 border-slate-200'} border text-xs font-bold px-3 py-1 rounded-full`}>{data.isVisible ? 'Öffentlich sichtbar' : 'Versteckt'}</div>
                         </div>
                     </div>
                 </div>
             </div>
-
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="md:col-span-2 space-y-6">
                     <Card className="p-6">
                         <h3 className="font-bold text-lg text-slate-900 mb-4 border-b border-slate-200 pb-2">Über uns</h3>
-                        {isEditing ? <textarea value={data.description} onChange={(e) => setData({...data, description: e.target.value})} className="w-full h-32 p-3 bg-slate-50 rounded-xl outline-none border focus:border-blue-500" placeholder="Beschreibung"/> : <p className="text-slate-600 leading-relaxed whitespace-pre-wrap">{data.description || "Keine Beschreibung hinterlegt."}</p>}
+                        {isEditing ? <textarea value={data.description} onChange={(e) => setData({...data, description: e.target.value})} className="w-full h-32 p-3 bg-slate-50 rounded-xl outline-none border focus:border-blue-500" /> : <p className="text-slate-600 leading-relaxed whitespace-pre-wrap">{data.description || "Keine Beschreibung hinterlegt."}</p>}
                     </Card>
                     <Card className="p-6">
                         <h3 className="font-bold text-lg text-slate-900 mb-4 flex items-center gap-2"><FileText size={20} className="text-blue-600"/> Neuigkeiten</h3>
@@ -234,9 +214,7 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
                         <div className="space-y-4">
                             <div className="flex justify-between"><span className="flex gap-2 items-center text-slate-700"><Users size={16}/> Mitarbeiter</span> <span className="font-bold">{employees.length}</span></div>
                             <div className="flex justify-between"><span className="flex gap-2 items-center text-slate-700"><FileText size={16}/> Beiträge</span> <span className="font-bold">{posts.length}</span></div>
-                            <div className="pt-4 border-t mt-4">
-                                {isEditing && <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={data.isVisible} onChange={e => setData({...data, isVisible: e.target.checked})}/> Profil öffentlich sichtbar machen</label>}
-                            </div>
+                            <div className="pt-4 border-t mt-4">{isEditing && <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={data.isVisible} onChange={e => setData({...data, isVisible: e.target.checked})}/> Profil öffentlich sichtbar machen</label>}</div>
                         </div>
                     </Card>
                 </div>
@@ -244,17 +222,12 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
         </div>
       )}
 
-      {/* NEU: MARKTPLATZ VIEW */}
       {tab === 'marketplace' && !selectedFirm && (
         <div className="space-y-4 animate-in fade-in">
           <div className="flex gap-2">
-            <div className="flex-1 relative">
-                <Search className="absolute left-3 top-3 text-slate-400" size={18}/>
-                <input className="w-full pl-10 p-3 rounded-xl border border-slate-200 outline-none focus:border-blue-500" placeholder="Firma suchen..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}/>
-            </div>
+            <div className="flex-1 relative"><Search className="absolute left-3 top-3 text-slate-400" size={18}/><input className="w-full pl-10 p-3 rounded-xl border border-slate-200 outline-none focus:border-blue-500 text-slate-900" placeholder="Firma suchen..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}/></div>
             <Button icon={Filter} variant="outline">Filter</Button>
           </div>
-          
           {marketLoading ? <div className="flex justify-center p-10"><Loader2 className="animate-spin text-blue-600"/></div> : (
             <div className="space-y-4">
                 {filteredFirms.map(f => (
@@ -267,34 +240,26 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
                     </div>
                 </Card>
                 ))}
-                {filteredFirms.length === 0 && <div className="text-center text-slate-400 py-10">Keine Firmen gefunden.</div>}
             </div>
           )}
         </div>
       )}
 
-      {/* NEU: MARKTPLATZ DETAILS VIEW */}
       {tab === 'marketplace' && selectedFirm && (
         <div className="space-y-6 animate-in fade-in">
-          <Button variant="ghost" onClick={() => setSelectedFirm(null)} icon={ArrowLeft} size="sm">Zurück zum Marktplatz</Button>
+          <Button variant="ghost" onClick={() => setSelectedFirm(null)} icon={ArrowLeft} size="sm">Zurück</Button>
           <Card className="overflow-hidden">
             <div className="h-32 bg-gradient-to-r from-blue-600 to-blue-400"></div>
             <div className="px-8 pb-6 -mt-10 flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
               <div className="flex items-end gap-4">
                   <Avatar src={selectedFirm.imageUrl} alt={selectedFirm.name} size="xl" className="bg-white border-4 border-white shadow-md"/>
-                  <div className="mb-2">
-                      <h1 className="text-2xl font-bold text-slate-900">{selectedFirm.name}</h1>
-                      <p className="text-slate-500 flex items-center gap-1"><MapPin size={14}/> {selectedFirm.address}</p>
-                  </div>
+                  <div className="mb-2"><h1 className="text-2xl font-bold text-slate-900">{selectedFirm.name}</h1><p className="text-slate-500 flex items-center gap-1"><MapPin size={14}/> {selectedFirm.address}</p></div>
               </div>
             </div>
             <div className="p-8 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div className="md:col-span-2 space-y-6">
                     <div><h3 className="font-bold text-slate-900 mb-2">Über uns</h3><p className="text-slate-600 leading-relaxed">{selectedFirm.description || "Keine Beschreibung verfügbar."}</p></div>
-                    <div>
-                        <h3 className="font-bold text-slate-900 mb-4">Neuigkeiten</h3>
-                        {firmPosts.length > 0 ? firmPosts.map(p => <PostItem key={p.id} post={p} companyId={selectedFirm.id} currentUserId={user.uid} />) : <div className="text-slate-400 italic">Keine Beiträge.</div>}
-                    </div>
+                    <div><h3 className="font-bold text-slate-900 mb-4">Neuigkeiten</h3>{firmPosts.length > 0 ? firmPosts.map(p => <PostItem key={p.id} post={p} companyId={selectedFirm.id} currentUserId={user.uid} />) : <div className="text-slate-400 italic">Keine Beiträge.</div>}</div>
                 </div>
                 <div><Card className="p-4 bg-slate-50 border-slate-200"><div className="text-xs font-bold text-slate-500 uppercase mb-1">Stundensatz</div><div className="text-2xl font-bold text-blue-600 mb-4">{selectedFirm.price}€</div></Card></div>
             </div>
@@ -319,17 +284,15 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
                 ))}
               </tbody>
             </table>
-            {employees.length === 0 && <div className="p-8 text-center text-slate-400">Noch keine Mitarbeiter.</div>}
           </Card>
         </div>
       )}
 
       {tab === 'req_manage' && (
           <div className="space-y-4">
-              <h3 className="font-bold text-lg text-slate-800">Offene Anträge prüfen</h3>
+              <h3 className="font-bold text-lg text-slate-800">Offene Anträge</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {requests.filter(r => r.status === 'Offen').length === 0 ? <div className="col-span-full p-8 text-center text-slate-400 bg-white border border-slate-200 rounded-xl">Keine offenen Anträge.</div> : 
-                  requests.filter(r => r.status === 'Offen').map(req => (
+                  {requests.filter(r => r.status === 'Offen').map(req => (
                       <div key={req.id} className="bg-white p-5 rounded-xl border border-l-4 border-l-orange-400 border-slate-200 shadow-sm">
                           <div className="flex justify-between items-start mb-2"><span className="font-bold text-slate-800">{req.employeeName}</span><span className="text-xs text-slate-400">{new Date(req.date).toLocaleDateString()}</span></div>
                           <div className="text-sm font-medium text-slate-600 mb-4">möchte <span className="text-slate-900 font-bold">{req.type}</span>{req.reason && <p className="mt-1 text-slate-500 italic">"{req.reason}"</p>}</div>
@@ -339,6 +302,7 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
                           </div>
                       </div>
                   ))}
+                  {requests.filter(r => r.status === 'Offen').length === 0 && <div className="col-span-full p-8 text-center text-slate-400">Keine offenen Anträge.</div>}
               </div>
           </div>
       )}
@@ -351,13 +315,12 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
 
       {showImageModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4 animate-in fade-in" onClick={() => setShowImageModal(false)}>
-            <div className="relative max-w-4xl w-full h-full flex items-center justify-center">
-                <button className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white p-2 rounded-full backdrop-blur-sm" onClick={() => setShowImageModal(false)}><X size={24} /></button>
-                <img src={data.imageUrl} alt={data.name} className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
+            <div className="relative max-w-4xl w-full h-full flex items-center justify-center text-white">
+                <button className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 p-2 rounded-full backdrop-blur-sm" onClick={() => setShowImageModal(false)}><X size={24} /></button>
+                <img src={data.imageUrl} className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
             </div>
         </div>
       )}
-
     </DashboardLayout>
   );
 };

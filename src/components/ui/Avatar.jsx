@@ -9,9 +9,9 @@ export const Avatar = ({ src, alt, size = "md", className = "" }) => {
     full: "h-full w-full"
   };
 
-  // HIER GEÄNDERT: rounded-xl statt rounded-full
+  // HIER GEÄNDERT: 'rounded-xl' statt 'rounded-full' für das abgerundete Quadrat
   return (
-    <div className={`${sizes[size]} rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden font-bold text-slate-400 flex-shrink-0 ${className}`}>
+    <div className={`${sizes[size]} rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden font-bold text-slate-400 flex-shrink-0 shadow-sm ${className}`}>
       {src ? (
         <img src={src} className="w-full h-full object-cover" alt={alt || "Avatar"} />
       ) : (

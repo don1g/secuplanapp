@@ -46,7 +46,6 @@ export const RosterScheduler = ({ user, employees = [], companyId, targetUserId,
     loadData();
   }, [date, companyId]);
 
-  // Wir lösen die Abhängigkeiten hier auf, damit kein Neuladen erzwungen wird
   useEffect(() => {
       if (activeUser.id) {
           setFormData({
@@ -98,17 +97,13 @@ export const RosterScheduler = ({ user, employees = [], companyId, targetUserId,
   return (
     <div className="flex flex-col lg:flex-row gap-6 h-full animate-in fade-in">
       
-      {/* LINKE SPALTE: PROFIL */}
+      {/* LINKE SPALTE: PROFIL (Design: rounded-xl & Lightbox) */}
       <Card className="w-full lg:w-80 flex-shrink-0 p-6 flex flex-col h-fit bg-white border-slate-200 shadow-md">
         <div className="flex flex-col items-center text-center relative">
             <div className="relative group mb-4">
-                <div 
-                    onClick={() => !isEditing && setShowImageModal(true)} 
-                    className={!isEditing ? "cursor-zoom-in transition-transform hover:scale-105" : ""}
-                >
+                <div onClick={() => !isEditing && setShowImageModal(true)} className={!isEditing ? "cursor-zoom-in transition-transform hover:scale-105" : ""}>
                     <Avatar src={activeUser.imageUrl} alt={activeUser.name} size="xl" className="shadow-lg border-4 border-slate-50"/>
                 </div>
-
                 {isOwnProfile && isEditing && (
                     <label className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-xl cursor-pointer text-white animate-in fade-in">
                         <Upload size={24}/>
@@ -131,7 +126,6 @@ export const RosterScheduler = ({ user, employees = [], companyId, targetUserId,
             )}
         </div>
 
-        {/* DATEN FELDER */}
         <div className="border-t border-slate-100 pt-4 space-y-4 text-sm text-slate-700">
             <div>
                 <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase mb-1"><Phone size={12}/> Telefon</div>
@@ -164,7 +158,7 @@ export const RosterScheduler = ({ user, employees = [], companyId, targetUserId,
         </div>
       </Card>
 
-      {/* KALENDER */}
+      {/* KALENDER (GitHub-Logik: Loading State integriert) */}
       <Card className="flex-1 overflow-hidden flex flex-col min-h-[500px]">
         <div className="p-4 border-b flex justify-between items-center bg-slate-50">
           <h3 className="font-bold text-slate-800">Dienstplan</h3>
@@ -179,7 +173,6 @@ export const RosterScheduler = ({ user, employees = [], companyId, targetUserId,
         </div>
         <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50">{['Mo','Di','Mi','Do','Fr','Sa','So'].map(d=><div key={d} className="py-2 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">{d}</div>)}</div>
         
-        {/* Lade-Ansicht oder Kalender-Grid */}
         {isLoading ? (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-slate-50 space-y-2">
                 <Loader2 className="animate-spin h-8 w-8 text-blue-500" />
@@ -207,70 +200,38 @@ export const RosterScheduler = ({ user, employees = [], companyId, targetUserId,
         )}
       </Card>
 
-      {/* DETAIL MODAL SCHICHT */}
+      {/* DETAIL MODAL (Design: Design Zeit-Banner) */}
       {selectedShift && (
         <Modal title="Einsatz-Details" onClose={() => setSelectedShift(null)}>
-            <div className="space-y-4">
-                
-                {/* NEU: Großes, klares Zeit-Banner */}
+            <div className="space-y-4 text-slate-900">
                 <div className="bg-blue-600 text-white p-4 rounded-xl shadow-md flex items-center gap-4">
-                    <div className="bg-white/20 p-3 rounded-full shrink-0">
-                        <Clock className="text-white h-8 w-8"/>
-                    </div>
+                    <div className="bg-white/20 p-3 rounded-full shrink-0"><Clock className="text-white h-8 w-8"/></div>
                     <div>
                         <div className="text-blue-100 text-xs font-bold uppercase tracking-wider mb-0.5">Dienstzeit</div>
                         <div className="text-lg font-black">{format(new Date(selectedShift.date), 'EEEE, dd.MM.yyyy', { locale: de })}</div>
                         <div className="text-base font-medium opacity-90">{selectedShift.startTime} Uhr - {selectedShift.endTime} Uhr</div>
                     </div>
                 </div>
-
                 <div className="border border-slate-100 rounded-xl p-4 space-y-4 bg-white shadow-sm">
-                    {/* Ort */}
                     <div>
-                        <div className="text-xs font-bold text-slate-400 uppercase mb-1 flex items-center gap-1"><MapPin size={12}/> Objekt / Einsatzort</div>
+                        <div className="text-xs font-bold text-slate-400 uppercase mb-1 flex items-center gap-1"><MapPin size={12}/> Objekt</div>
                         <div className="font-bold text-lg text-slate-900">{selectedShift.objectDetails?.name || selectedShift.location || "Unbekannt"}</div>
                         {selectedShift.objectDetails?.address && <div className="text-slate-600 text-sm mt-0.5">{selectedShift.objectDetails.address}</div>}
                     </div>
-                    
-                    {/* Auftraggeber */}
-                    {selectedShift.objectDetails?.client && (
-                        <div className="pt-3 border-t border-slate-100">
-                            <div className="text-xs font-bold text-slate-400 uppercase mb-1 flex items-center gap-1"><User size={12}/> Auftraggeber</div>
-                            <div className="text-slate-800 text-sm font-medium">{selectedShift.objectDetails.client}</div>
-                        </div>
-                    )}
-                    
-                    {/* Uniform */}
-                    {selectedShift.objectDetails?.uniform && (
-                        <div className="pt-3 border-t border-slate-100">
-                            <div className="text-xs font-bold text-slate-400 uppercase mb-1 flex items-center gap-1"><Shirt size={12}/> Dienstkleidung</div>
-                            <div className="bg-slate-100 px-3 py-1.5 rounded-md text-sm text-slate-700 inline-block font-medium">{selectedShift.objectDetails.uniform}</div>
-                        </div>
-                    )}
-                    
-                    {/* Notes */}
-                    {selectedShift.objectDetails?.notes && (
-                        <div className="pt-3 border-t border-slate-100">
-                            <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-lg">
-                                <div className="text-xs font-bold text-yellow-700 uppercase mb-1 flex items-center gap-1"><Info size={12}/> Wichtige Infos</div>
-                                <div className="text-sm text-yellow-900 whitespace-pre-wrap">{selectedShift.objectDetails.notes}</div>
-                            </div>
-                        </div>
-                    )}
+                    {selectedShift.objectDetails?.client && <div className="pt-3 border-t border-slate-100"><div className="text-xs font-bold text-slate-400 uppercase mb-1 flex items-center gap-1"><User size={12}/> Auftraggeber</div><div className="text-slate-800 text-sm font-medium">{selectedShift.objectDetails.client}</div></div>}
+                    {selectedShift.objectDetails?.uniform && <div className="pt-3 border-t border-slate-100"><div className="text-xs font-bold text-slate-400 uppercase mb-1 flex items-center gap-1"><Shirt size={12}/> Kleidergröße</div><div className="bg-slate-100 px-3 py-1.5 rounded-md text-sm text-slate-700 inline-block font-medium">{selectedShift.objectDetails.uniform}</div></div>}
+                    {selectedShift.objectDetails?.notes && <div className="pt-3 border-t border-slate-100"><div className="bg-yellow-50 border border-yellow-200 p-3 rounded-lg"><div className="text-xs font-bold text-yellow-700 uppercase mb-1 flex items-center gap-1"><Info size={12}/> Info</div><div className="text-sm text-yellow-900 whitespace-pre-wrap">{selectedShift.objectDetails.notes}</div></div></div>}
                 </div>
-                
-                <Button className="w-full mt-2" variant="outline" onClick={() => setSelectedShift(null)}>Fenster schließen</Button>
+                <Button className="w-full mt-2" variant="outline" onClick={() => setSelectedShift(null)}>Schließen</Button>
             </div>
         </Modal>
       )}
 
-      {/* BILD VERGRÖßERUNGS MODAL */}
+      {/* LIGHTBOX MODAL */}
       {showImageModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4 animate-in fade-in" onClick={() => setShowImageModal(false)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4 animate-in fade-in text-white" onClick={() => setShowImageModal(false)}>
             <div className="relative max-w-4xl w-full h-full flex items-center justify-center">
-                <button className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white p-2 rounded-full backdrop-blur-sm" onClick={() => setShowImageModal(false)}>
-                    <X size={24} />
-                </button>
+                <button className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white p-2 rounded-full backdrop-blur-sm" onClick={() => setShowImageModal(false)}><X size={24} /></button>
                 <img src={activeUser.imageUrl} alt={activeUser.name} className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
             </div>
         </div>
