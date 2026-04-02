@@ -1,214 +1,221 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  ChevronLeft, ChevronRight, Download, Mail, Phone, MapPin, 
-  Clock, Info, User, Save, Upload, CreditCard, Shirt, 
-  FileText, Car, X, Loader2, Calendar 
+  ChevronLeft, ChevronRight, Clock, Info, 
+  MapPin, User, Shirt, Calendar, Loader2, CheckCircle, Car, Users, FileText, Download 
 } from 'lucide-react';
 import { 
   format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, 
-  eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths 
+  eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, parseISO, isAfter 
 } from 'date-fns';
 import { de } from 'date-fns/locale';
-import { collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { jsPDF } from "jspdf";
 import autoTable from 'jspdf-autotable';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
-import { Badge } from '../ui/Badge';
-import { Avatar } from '../ui/Avatar';
 import { Modal } from '../ui/Modal';
-import { EMP_ROLES } from '../../utils/constants';
 
-export const RosterScheduler = ({ user, employees = [], companyId, targetUserId, onSaveProfile, onImageUpload }) => {
+export const RosterScheduler = ({ user, companyId }) => {
   const [date, setDate] = useState(new Date());
   const [shifts, setShifts] = useState([]);
-  const [objects, setObjects] = useState([]);
+  const [allShifts, setAllShifts] = useState([]);
   const [selectedShift, setSelectedShift] = useState(null);
-  const [showImageModal, setShowImageModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const activeUserId = targetUserId || user.uid;
-  const activeUser = employees.find(e => e.id === activeUserId) || { name: "Mitarbeiter" };
-  const isOwnProfile = user.uid === activeUser.id;
-
-  const [isEditing, setIsEditing] = useState(false);
-  const [formData, setFormData] = useState({});
-
   useEffect(() => {
-    if (!companyId) return;
+    if (!companyId || !user?.uid) return;
     setIsLoading(true);
     
-    // Echtzeit-Sync für Schichten
-    const start = startOfWeek(startOfMonth(date), { weekStartsOn: 1 }).toISOString().split('T')[0];
-    const end = endOfWeek(endOfMonth(date), { weekStartsOn: 1 }).toISOString().split('T')[0];
-    
-    const qShifts = query(collection(db, "companies", companyId, "shifts"), where("date", ">=", start), where("date", "<=", end));
-    const unsubShifts = onSnapshot(qShifts, (snap) => {
-        setShifts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    const unsub = onSnapshot(collection(db, "companies", companyId, "shifts"), (snap) => {
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setAllShifts(data);
+        setShifts(data.filter(s => s.employeeId === user.uid));
         setIsLoading(false);
     });
 
-    // Objekte laden
-    const unsubObjects = onSnapshot(collection(db, "companies", companyId, "objects"), (snap) => {
-        setObjects(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    return () => unsub();
+  }, [companyId, user?.uid]);
+
+  // --- BERECHNUNGSLOGIK FÜR PDF & DASHBOARD ---
+
+  const getShiftIntervals = (s) => {
+    const start = new Date(s.date + 'T' + s.startTime);
+    let end = new Date(s.date + 'T' + s.endTime);
+    if (end < start) end.setDate(end.getDate() + 1);
+    return { start, end };
+  };
+
+  const calculateTotalHours = (start, end) => (end - start) / (1000 * 60 * 60);
+
+  const calculateNightHours = (start, end) => {
+    let nightMin = 0;
+    let curr = new Date(start);
+    while (curr < end) {
+      const h = curr.getHours();
+      if (h >= 22 || h < 6) nightMin++; 
+      curr.setMinutes(curr.getMinutes() + 1);
+    }
+    return nightMin / 60;
+  };
+
+  const calculateSundayHours = (start, end) => {
+    let sunMin = 0;
+    let curr = new Date(start);
+    while (curr < end) {
+      if (curr.getDay() === 0) sunMin++;
+      curr.setMinutes(curr.getMinutes() + 1);
+    }
+    return sunMin / 60;
+  };
+
+  // --- PDF EXPORT (MATCHING THE SAMPLE PDF) ---
+
+  const exportMonthlyPDF = () => {
+    const pdf = new jsPDF('landscape', 'mm', 'a4');
+    const monthTitle = format(date, 'MMMM yyyy', { locale: de });
+    const now = new Date();
+    
+    // Header Sektion
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(16);
+    pdf.text(`Offizielle Abrechnungsübersicht: ${monthTitle}`, 14, 15);
+    
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(10);
+    pdf.text(`Mitarbeiter: ${user.name}`, 14, 22);
+    pdf.text(`Status: Nur bestätigte und abgeschlossene Einsätze`, 14, 27);
+
+    // Daten filtern: Nur bestätigte & vergangen
+    const monthlyShifts = shifts.filter(s => {
+        if (!isSameMonth(parseISO(s.date), date) || !s.isConfirmed) return false;
+        const { end } = getShiftIntervals(s);
+        return isAfter(now, end);
+    }).sort((a, b) => a.date.localeCompare(b.date));
+
+    const tableData = monthlyShifts.map(s => {
+      const { start, end } = getShiftIntervals(s);
+      const total = calculateTotalHours(start, end);
+      const night = calculateNightHours(start, end);
+      const sunday = calculateSundayHours(start, end);
+      
+      // Datumsformatierung wie im Beispiel: 01.04. (Mi.)
+      const dayName = format(start, 'EEE', { locale: de });
+      const formattedDate = `${format(start, 'dd.MM.')} (${dayName}.)`;
+
+      return [
+        formattedDate,
+        s.location,
+        `${s.startTime}-${s.endTime}`,
+        total.toFixed(2) + ' h',
+        night > 0 ? night.toFixed(2) + ' h' : '',
+        sunday > 0 ? sunday.toFixed(2) + ' h' : '',
+        '' // Feiertag (Platzhalter)
+      ];
     });
 
-    return () => { unsubShifts(); unsubObjects(); };
-  }, [date, companyId]);
+    const totalSum = tableData.reduce((acc, row) => acc + parseFloat(row[3]), 0);
 
-  useEffect(() => {
-      if (activeUser) {
-          setFormData({
-              phone: activeUser.phone || '',
-              address: activeUser.address || '',
-              iban: activeUser.iban || '',
-              taxId: activeUser.taxId || '',
-              shirtSize: activeUser.shirtSize || 'M',
-              hasLicense: activeUser.hasLicense || false
-          });
-      }
-  }, [activeUser]);
+    autoTable(pdf, {
+      head: [['Datum', 'Einsatzort', 'Zeitraum', 'Gesamt', 'Nacht (22-06)', 'Sonntag', 'Feiertag']],
+      body: tableData,
+      startY: 32,
+      theme: 'grid', // Sauberer Gitter-Look wie im Beispiel
+      styles: { fontSize: 8, cellPadding: 2, textColor: [0, 0, 0], lineColor: [200, 200, 200] },
+      headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold', halign: 'left' },
+      columnStyles: { 
+          0: { cellWidth: 35 },
+          3: { halign: 'right', fontStyle: 'bold' },
+          4: { halign: 'right' },
+          5: { halign: 'right' },
+          6: { halign: 'right' }
+      },
+      foot: [['', '', 'ABGERECHNETE SUMME', totalSum.toFixed(2) + ' h', '', '', '']],
+      footStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], fontStyle: 'bold', halign: 'right' }
+    });
 
-  const handleSave = () => {
-      if (onSaveProfile) {
-          onSaveProfile(formData);
-          setIsEditing(false);
-      }
+    pdf.save(`Abrechnung_${user.name}_${monthTitle}.pdf`);
   };
 
-  const exportPDF = () => {
-    const pdf = new jsPDF('landscape', 'mm', 'a4');
-    pdf.text(`Dienstplan - ${activeUser.name}`, 14, 15);
-    const tableData = shifts
-        .filter(s => s.employeeId === activeUserId && isSameMonth(new Date(s.date), date))
-        .map(s => [s.date, s.startTime, s.endTime, s.location]);
-    autoTable(pdf, { head: [['Datum', 'Von', 'Bis', 'Objekt']], body: tableData, startY: 25 });
-    pdf.save(`Plan_${activeUser.name}.pdf`);
-  };
+  const totalConfirmedPastHours = useMemo(() => {
+    const now = new Date();
+    return shifts.filter(s => {
+        if (!isSameMonth(parseISO(s.date), date) || !s.isConfirmed) return false;
+        const { end } = getShiftIntervals(s);
+        return isAfter(now, end);
+    }).reduce((sum, s) => {
+        const { start, end } = getShiftIntervals(s);
+        return sum + calculateTotalHours(start, end);
+    }, 0);
+  }, [shifts, date]);
 
   const days = eachDayOfInterval({ 
-      start: startOfWeek(startOfMonth(date), { weekStartsOn: 1 }), 
-      end: endOfWeek(endOfMonth(date), { weekStartsOn: 1 }) 
+    start: startOfWeek(startOfMonth(date), { weekStartsOn: 1 }), 
+    end: endOfWeek(endOfMonth(date), { weekStartsOn: 1 }) 
   });
   
   return (
-    <div className="flex flex-col lg:flex-row gap-8 h-full animate-in fade-in duration-500">
+    <div className="space-y-4 animate-in fade-in duration-500 pb-10">
       
-      {/* LINKE SPALTE: PROFIL-ZENTRALE (Screenshot Design) */}
-      <Card className="w-full lg:w-[380px] flex-shrink-0 p-8 flex flex-col h-fit bg-white rounded-[2.5rem] shadow-2xl border-slate-100">
-        <div className="flex flex-col items-center text-center relative">
-            <div className="relative group mb-6">
-                <div 
-                    onClick={() => !isEditing && setShowImageModal(true)} 
-                    className={`h-44 w-44 rounded-[3rem] overflow-hidden bg-white p-2 shadow-2xl border border-slate-50 transition-all duration-500 ${!isEditing ? 'cursor-zoom-in hover:scale-105' : ''}`}
-                >
-                    <Avatar src={activeUser.imageUrl} alt={activeUser.name} size="full" className="rounded-[2.5rem]" />
-                </div>
-                {isOwnProfile && isEditing && (
-                    <label className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-[3rem] cursor-pointer text-white animate-in fade-in">
-                        <Upload size={28}/>
-                        <input type="file" className="hidden" onChange={onImageUpload} />
-                    </label>
-                )}
-            </div>
-            
-            <h2 className="text-3xl font-black text-slate-900 tracking-tight mb-2">{activeUser.name}</h2>
-            <div className="flex items-center gap-2 mb-6">
-                <Badge color="blue" className="px-4 py-1 uppercase text-[9px] font-black tracking-widest">{EMP_ROLES[activeUser.role]?.label || activeUser.role}</Badge>
-                <div className="h-2 w-2 bg-green-500 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div>
-            </div>
+      {/* HEADER NAVIGATION */}
+      <Card className="p-4 flex flex-col sm:flex-row items-center justify-between gap-4 bg-white shadow-xl rounded-[2rem] border-slate-100">
+        <div className="flex items-center bg-slate-50 p-1.5 rounded-2xl border border-slate-100 w-full sm:w-auto">
+          <button onClick={() => setDate(subMonths(date, 1))} className="p-2 hover:bg-white rounded-xl transition-all text-slate-400 hover:text-blue-600"><ChevronLeft size={20}/></button>
+          
+          <div className="flex items-center gap-3 px-4 flex-1 justify-center">
+              <span className="text-xs font-black text-slate-900 capitalize whitespace-nowrap">
+                {format(date, 'MMMM yyyy', { locale: de })}
+              </span>
+              <div className="flex items-center gap-1.5 bg-blue-600 text-white px-2.5 py-1 rounded-xl shadow-sm">
+                <Clock size={10}/>
+                <span className="text-[10px] font-black uppercase tracking-widest">
+                  {totalConfirmedPastHours.toFixed(2)}h
+                </span>
+              </div>
+          </div>
 
-            {isOwnProfile && (
-                <button 
-                    onClick={() => setIsEditing(!isEditing)}
-                    className={`w-full py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all mb-8 ${isEditing ? 'bg-slate-100 text-slate-500' : 'bg-blue-50 text-blue-600 shadow-lg shadow-blue-50 hover:bg-blue-600 hover:text-white'}`}
-                >
-                    {isEditing ? "Abbrechen" : "Profil anpassen"}
-                </button>
-            )}
+          <button onClick={() => setDate(addMonths(date, 1))} className="p-2 hover:bg-white rounded-xl transition-all text-slate-400 hover:text-blue-600"><ChevronRight size={20}/></button>
         </div>
 
-        <div className="space-y-4">
-            <div className={`p-5 rounded-[1.5rem] border transition-all ${isEditing ? 'bg-white border-blue-200 ring-4 ring-blue-50' : 'bg-slate-50 border-slate-100'}`}>
-                <div className="flex items-center gap-3 mb-2">
-                    <div className="p-2 bg-white rounded-xl shadow-sm text-blue-600"><Phone size={16}/></div>
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Erreichbarkeit</span>
-                </div>
-                {isEditing ? (
-                    <input className="w-full bg-transparent border-none font-bold text-slate-900 outline-none p-0" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} placeholder="+49..." />
-                ) : (
-                    <div className="font-bold text-slate-900">{activeUser.phone || "Nicht hinterlegt"}</div>
-                )}
-            </div>
-
-            <div className={`p-5 rounded-[1.5rem] border transition-all ${isEditing ? 'bg-white border-blue-200 ring-4 ring-blue-50' : 'bg-slate-50 border-slate-100'}`}>
-                <div className="flex items-center gap-3 mb-2">
-                    <div className="p-2 bg-white rounded-xl shadow-sm text-blue-600"><MapPin size={16}/></div>
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Wohnort</span>
-                </div>
-                {isEditing ? (
-                    <textarea rows="2" className="w-full bg-transparent border-none font-bold text-slate-900 outline-none p-0 resize-none" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} placeholder="Straße, PLZ Stadt" />
-                ) : (
-                    <div className="font-bold text-slate-900 whitespace-pre-wrap">{activeUser.address || "Nicht hinterlegt"}</div>
-                )}
-            </div>
-
-            {isEditing && (
-                <Button className="w-full py-5 rounded-2xl shadow-xl shadow-blue-200 font-black uppercase tracking-widest text-xs mt-4" onClick={handleSave} icon={Save}>
-                    Speichern
-                </Button>
-            )}
-        </div>
+        <button 
+          onClick={exportMonthlyPDF}
+          className="w-full sm:w-auto bg-slate-900 hover:bg-blue-600 text-white px-6 py-3 rounded-2xl transition-all font-black text-[10px] uppercase tracking-[0.15em] flex items-center justify-center gap-2 shadow-xl"
+        >
+          <Download size={14}/> Abrechnung PDF
+        </button>
       </Card>
-
-      {/* RECHTE SPALTE: DIENSTPLAN-KALENDER (Screenshot Design) */}
-      <Card className="flex-1 overflow-hidden flex flex-col min-h-[600px] bg-white rounded-[3rem] shadow-2xl border-slate-100">
-        <div className="p-8 flex justify-between items-center border-b border-slate-50">
-          <div>
-              <h3 className="text-2xl font-black text-slate-900 tracking-tight">Einsatzplan</h3>
-              <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">Persönliche Schichtübersicht</p>
-          </div>
-          <div className="flex items-center gap-4">
-            <Button variant="outline" onClick={exportPDF} className="rounded-2xl border-slate-100 shadow-sm" icon={Download}>Export</Button>
-            <div className="flex items-center bg-slate-50 p-1 rounded-2xl border border-slate-100">
-              <button onClick={() => setDate(subMonths(date, 1))} className="p-3 hover:bg-white hover:shadow-sm rounded-xl transition-all text-slate-400 hover:text-blue-600"><ChevronLeft size={20}/></button>
-              <span className="px-6 text-sm font-black text-slate-900 capitalize min-w-[140px] text-center">{format(date, 'MMMM yyyy', { locale: de })}</span>
-              <button onClick={() => setDate(addMonths(date, 1))} className="p-3 hover:bg-white hover:shadow-sm rounded-xl transition-all text-slate-400 hover:text-blue-600"><ChevronRight size={20}/></button>
-            </div>
-          </div>
+      
+      {/* KALENDER GRID */}
+      <Card className="overflow-hidden bg-white rounded-[2.5rem] shadow-2xl border-slate-100">
+        <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50/50">
+            {['Mo','Di','Mi','Do','Fr','Sa','So'].map(d => (
+              <div key={d} className={`py-4 text-center text-[10px] font-black uppercase tracking-[0.2em] ${d === 'So' ? 'text-red-500' : 'text-slate-400'}`}>{d}</div>
+            ))}
         </div>
-        
-        <div className="grid grid-cols-7 border-b border-slate-50 bg-slate-50/30">
-            {['Mo','Di','Mi','Do','Fr','Sa','So'].map(d=><div key={d} className="py-4 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{d}</div>)}
-        </div>
-        
-        <div className="grid grid-cols-7 auto-rows-fr bg-slate-100/50 gap-px flex-1">
+        <div className="grid grid-cols-7 auto-rows-fr bg-slate-100/30 gap-px">
           {days.map(d => {
             const dStr = format(d, 'yyyy-MM-dd');
+            const dayShifts = shifts.filter(s => s.date === dStr);
             const isToday = isSameDay(d, new Date());
-            const dayShifts = shifts.filter(s => s.date === dStr && s.employeeId === activeUserId);
-            const isCurrentMonth = isSameMonth(d, date);
-            
+            const isSunday = d.getDay() === 0;
+
             return (
-              <div key={dStr} className={`bg-white p-3 min-h-[110px] flex flex-col transition-all ${!isCurrentMonth ? 'opacity-30 bg-slate-50/50' : 'hover:bg-slate-50/50'}`}>
-                <span className={`text-[11px] font-black w-8 h-8 flex items-center justify-center rounded-xl mb-2 ${isToday ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-slate-400'}`}>
-                    {format(d, 'd')}
-                </span>
-                <div className="flex-1 flex flex-col gap-2">
-                  {dayShifts.map((s, i) => {
-                    const obj = objects.find(o => o.id === s.objectId);
-                    return (
-                        <div 
-                            key={i} 
-                            onClick={() => setSelectedShift({ ...s, objectDetails: obj })} 
-                            className="bg-gradient-to-br from-blue-600 to-blue-700 text-white text-[10px] font-black rounded-xl p-3 shadow-lg shadow-blue-200 cursor-pointer hover:scale-[1.03] transition-all animate-in zoom-in-95"
-                        >
-                            <div className="flex items-center gap-1.5 mb-1 opacity-90"><Clock size={10}/> {s.startTime} - {s.endTime}</div>
-                            <div className="truncate uppercase tracking-tighter border-t border-white/20 pt-1.5">{obj?.name || s.location}</div>
+              <div key={dStr} className={`bg-white p-2 min-h-[120px] ${!isSameMonth(d, date) ? 'opacity-30' : ''}`}>
+                <div className="flex justify-between items-start mb-2">
+                    <div className={`text-[11px] font-black w-7 h-7 flex items-center justify-center rounded-xl mb-1 ${isToday ? 'bg-blue-600 text-white shadow-lg' : isSunday ? 'text-red-500 bg-red-50' : 'text-slate-400'}`}>
+                        {format(d, 'd')}
+                    </div>
+                </div>
+                <div className="space-y-1.5">
+                  {dayShifts.map((s, i) => (
+                    <div key={i} onClick={() => setSelectedShift(s)} className={`${s.isConfirmed ? 'bg-green-50 text-green-700 border-green-100' : 'bg-blue-50 text-blue-700 border-blue-100'} text-[8px] font-bold rounded-xl p-2 border cursor-pointer hover:scale-105 transition-all shadow-sm overflow-hidden`}>
+                        <div className="flex justify-between items-center mb-0.5">
+                            <span className="truncate">{s.startTime}-{s.endTime}</span>
+                            {s.isConfirmed && <CheckCircle size={10}/>}
                         </div>
-                    );
-                  })}
+                        <div className="opacity-70 truncate border-t border-current/10 pt-1 leading-tight">{s.location}</div>
+                    </div>
+                  ))}
                 </div>
               </div>
             );
@@ -216,63 +223,76 @@ export const RosterScheduler = ({ user, employees = [], companyId, targetUserId,
         </div>
       </Card>
 
-      {/* DETAIL MODAL (Screenshot Design mit Zeit-Banner) */}
+      {/* DETAIL MODAL (BLEIBT GLEICH) */}
       {selectedShift && (
-        <Modal title="Einsatzdetails" onClose={() => setSelectedShift(null)}>
-            <div className="space-y-6">
-                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6 rounded-[2rem] shadow-2xl shadow-blue-200 flex items-center gap-5">
-                    <div className="bg-white/20 p-4 rounded-2xl backdrop-blur-md shadow-inner"><Clock className="text-white h-10 w-10"/></div>
-                    <div>
-                        <div className="text-[10px] font-black text-blue-100 uppercase tracking-widest mb-1">Dienstzeit</div>
-                        <div className="text-xl font-black">{format(new Date(selectedShift.date), 'EEEE, dd.MM.yyyy', { locale: de })}</div>
-                        <div className="text-lg font-bold opacity-90">{selectedShift.startTime} Uhr - {selectedShift.endTime} Uhr</div>
-                    </div>
-                </div>
-
-                <div className="grid gap-4">
-                    <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
-                        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2"><MapPin size={12} className="text-blue-500"/> Einsatzort</div>
-                        <div className="text-xl font-black text-slate-900">{selectedShift.objectDetails?.name || selectedShift.location || "Unbekannt"}</div>
-                        {selectedShift.objectDetails?.address && <div className="text-slate-500 font-medium text-sm mt-1">{selectedShift.objectDetails.address}</div>}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        {selectedShift.objectDetails?.client && (
-                            <div className="bg-slate-50 p-5 rounded-[1.5rem] border border-slate-100">
-                                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-2"><User size={12} className="text-blue-500"/> Kunde</div>
-                                <div className="text-sm font-bold text-slate-800">{selectedShift.objectDetails.client}</div>
-                            </div>
-                        )}
-                        {selectedShift.objectDetails?.uniform && (
-                            <div className="bg-slate-50 p-5 rounded-[1.5rem] border border-slate-100">
-                                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-2"><Shirt size={12} className="text-blue-500"/> Kleidung</div>
-                                <div className="text-sm font-bold text-slate-800">{selectedShift.objectDetails.uniform}</div>
-                            </div>
-                        )}
-                    </div>
-
-                    {selectedShift.objectDetails?.notes && (
-                        <div className="bg-amber-50 p-6 rounded-[2rem] border border-amber-100 relative overflow-hidden">
-                            <div className="absolute top-0 right-0 p-4 opacity-10 text-amber-600"><Info size={40}/></div>
-                            <div className="text-[10px] font-black text-amber-600 uppercase tracking-widest mb-2">Instruktionen</div>
-                            <div className="text-sm text-amber-900 font-medium leading-relaxed whitespace-pre-wrap">{selectedShift.objectDetails.notes}</div>
+        <Modal title="Einsatz-Details" onClose={() => setSelectedShift(null)}>
+            <div className="space-y-6 max-h-[85vh] overflow-y-auto pr-1 text-slate-900">
+                <div className={`p-6 rounded-[2rem] flex items-center justify-between text-white shadow-2xl ${selectedShift.isConfirmed ? 'bg-green-600' : 'bg-blue-600'}`}>
+                    <div className="flex items-center gap-5">
+                        <div className="p-4 bg-white/20 rounded-2xl shadow-inner"><Clock size={28}/></div>
+                        <div>
+                            <div className="text-[10px] font-black opacity-70 uppercase tracking-widest mb-1">Einsatzzeit</div>
+                            <div className="font-black text-xl">{format(new Date(selectedShift.date), 'EEEE, dd.MM.yyyy', { locale: de })}</div>
+                            <div className="text-md font-bold opacity-90">{selectedShift.startTime} - {selectedShift.endTime} Uhr</div>
                         </div>
-                    )}
+                    </div>
                 </div>
-                
-                <button onClick={() => setSelectedShift(null)} className="w-full py-5 bg-slate-900 text-white font-black rounded-2xl uppercase tracking-widest text-xs hover:bg-black transition-all shadow-xl">Schließen</button>
+
+                {!selectedShift.isConfirmed && (
+                    <button 
+                      className="w-full bg-green-600 hover:bg-green-700 text-white py-5 rounded-2xl font-black uppercase text-xs tracking-[0.2em] shadow-2xl" 
+                      onClick={async () => {
+                          await updateDoc(doc(db, "companies", companyId, "shifts", selectedShift.id), { isConfirmed: true });
+                          setSelectedShift(prev => ({...prev, isConfirmed: true}));
+                      }}
+                    >
+                      Dienst jetzt Bestätigen
+                    </button>
+                )}
+
+                <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 space-y-8">
+                    <div className="flex gap-5">
+                      <MapPin size={24} className="text-blue-600 shrink-0 mt-1"/>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Einsatzort</div>
+                        <div className="text-lg font-black uppercase leading-tight text-slate-900">{selectedShift.location}</div>
+                        <div className="text-xs font-medium text-slate-500 mt-1">{selectedShift.objectAddress || "Keine Adresse hinterlegt"}</div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-6">
+                        <div className="bg-white p-4 rounded-2xl border border-slate-100 text-center shadow-sm">
+                            <div className="text-[10px] font-black text-slate-400 uppercase mb-2 tracking-widest flex items-center justify-center gap-2"><Car size={14}/> Fahrer</div>
+                            <div className={`text-xs font-black uppercase ${selectedShift.isDriver ? 'text-blue-600' : 'text-slate-400 italic'}`}>
+                                {selectedShift.isDriver ? "Aktiv" : "Nein"}
+                            </div>
+                        </div>
+                        <div className="bg-white p-4 rounded-2xl border border-slate-100 text-center shadow-sm">
+                            <div className="text-[10px] font-black text-slate-400 uppercase mb-2 tracking-widest flex items-center justify-center gap-2"><Shirt size={14}/> Kleidung</div>
+                            <div className="text-xs font-black uppercase text-slate-800">{selectedShift.uniform || "Standard"}</div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-6">
+                        <div className="flex items-start gap-4">
+                            <div className="p-3 bg-blue-50 rounded-xl text-blue-600 shadow-sm"><User size={20}/></div>
+                            <div className="flex-1">
+                                <div className="text-[10px] font-black text-slate-400 uppercase mb-1">Ansprechpartner</div>
+                                <div className="text-sm font-bold">{selectedShift.contactPerson || "Keine Angabe"}</div>
+                            </div>
+                        </div>
+                        <div className="flex items-start gap-4">
+                            <div className="p-3 bg-blue-50 rounded-xl text-blue-600 shadow-sm"><Info size={20}/></div>
+                            <div className="flex-1">
+                                <div className="text-[10px] font-black text-slate-400 uppercase mb-1">Parken / Anfahrt</div>
+                                <div className="text-sm font-bold">{selectedShift.parkingInfo || "Keine Angabe"}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <Button className="w-full py-5 text-slate-400 font-black uppercase text-[10px] tracking-widest hover:text-slate-600" variant="ghost" onClick={() => setSelectedShift(null)}>Schließen</Button>
             </div>
         </Modal>
-      )}
-
-      {/* LIGHTBOX MODAL */}
-      {showImageModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/95 backdrop-blur-2xl p-10 animate-in fade-in" onClick={() => setShowImageModal(false)}>
-            <div className="relative max-w-5xl w-full h-full flex items-center justify-center">
-                <button className="absolute -top-16 right-0 text-white/40 hover:text-white transition-all hover:rotate-90" onClick={() => setShowImageModal(false)}><X size={48} /></button>
-                <img src={activeUser.imageUrl} className="max-w-full max-h-full object-contain rounded-[3rem] shadow-[0_0_80px_rgba(0,0,0,0.5)] animate-in zoom-in-95" alt="Profilbild" />
-            </div>
-        </div>
       )}
     </div>
   );
