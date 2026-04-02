@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { CalendarDays, FileText, Plus, Users, User, Trash2, Upload, Loader2 } from 'lucide-react';
 import { collection, query, where, getDocs, addDoc, doc, updateDoc, deleteField } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -16,25 +16,26 @@ export const EmployeeDashboard = ({ user, onLogout }) => {
   const [requests, setRequests] = useState([]);
   const [teamMembers, setTeamMembers] = useState([]);
   const [viewingProfileId, setViewingProfileId] = useState(null);
-  const [loading, setLoading] = useState(false); // Für Lade-Status beim Löschen
+  const [loading, setLoading] = useState(false);
 
-  // State für Profil-Bearbeitung (Daten)
   const [editData, setEditData] = useState({ 
     phone: user.phone || "", 
     address: user.address || "" 
   });
 
-  // Prüfen ob Lead
   const isLead = user.role === 'team_lead' || user.role === 'obj_lead';
 
-  // Requests laden
+  // NEU: Dies verhindert das ständige "Springen" und Neu-Laden des Dienstplans!
+  const currentUserAsArray = useMemo(() => {
+      return [{ id: user.uid, ...user }];
+  }, [user.uid, user.name, user.role, user.phone, user.address, user.imageUrl]);
+
   useEffect(() => {
     if (!user.companyId) return;
     const q = query(collection(db, "companies", user.companyId, "requests"), where("employeeId", "==", user.uid));
     getDocs(q).then(s => setRequests(s.docs.map(d => ({id: d.id, ...d.data()}))));
   }, [user]);
 
-  // Team laden (NUR für Leads)
   useEffect(() => {
       if (isLead && user.companyId) {
           getDocs(collection(db, "companies", user.companyId, "employees")).then(s => {
@@ -43,7 +44,6 @@ export const EmployeeDashboard = ({ user, onLogout }) => {
       }
   }, [user, isLead]);
 
-  // Neuen Antrag stellen
   const handleReq = async () => {
     const type = prompt("Art des Antrags (z.B. Urlaub, Krankmeldung):"); 
     if(!type) return;
@@ -61,7 +61,6 @@ export const EmployeeDashboard = ({ user, onLogout }) => {
     setRequests([...requests, { id: Date.now(), ...newReq }]);
   };
 
-  // Profil Daten speichern
   const handleSaveData = async () => {
       setLoading(true);
       try {
@@ -73,7 +72,6 @@ export const EmployeeDashboard = ({ user, onLogout }) => {
       setLoading(false);
   };
 
-  // BILD HOCHLADEN
   const handleImageUpload = async (e) => {
       const file = e.target.files[0]; if(!file) return;
       setLoading(true);
@@ -89,14 +87,11 @@ export const EmployeeDashboard = ({ user, onLogout }) => {
       setLoading(false);
   };
 
-  // BILD LÖSCHEN (Die Funktion, die du wolltest)
   const handleDeleteImage = async () => {
       if (!confirm("Profilbild wirklich löschen?")) return;
       setLoading(true);
       try {
-          // 1. Aus User-Profil löschen
           await updateDoc(doc(db, "users", user.uid), { imageUrl: deleteField() });
-          // 2. Auch aus der Firmen-Liste löschen
           if (user.companyId) {
               await updateDoc(doc(db, "companies", user.companyId, "employees", user.uid), { imageUrl: deleteField() });
           }
@@ -106,18 +101,16 @@ export const EmployeeDashboard = ({ user, onLogout }) => {
       setLoading(false);
   };
 
-  // Menü bauen
   const menu = [
     { id: 'schedule', name: 'Mein Dienstplan', icon: <CalendarDays size={20}/> },
     { id: 'requests', name: 'Meine Anträge', icon: <FileText size={20}/> },
-    { id: 'files', name: 'Meine Akte', icon: <User size={20}/> } // WICHTIG: Tab hinzugefügt für Profilbild
+    { id: 'files', name: 'Meine Akte', icon: <User size={20}/> } 
   ];
 
   if (isLead) {
       menu.push({ id: 'team_planning', name: 'Team Planung', icon: <Users size={20}/> });
   }
 
-  // Profil Ansicht Modal
   if (viewingProfileId) {
       return (
           <DashboardLayout title="Mitarbeiter Portal" user={user} sidebarItems={menu} activeTab={tab} onTabChange={setTab} onLogout={onLogout}>
@@ -129,19 +122,16 @@ export const EmployeeDashboard = ({ user, onLogout }) => {
   return (
     <DashboardLayout title="Mitarbeiter Portal" user={user} sidebarItems={menu} activeTab={tab} onTabChange={setTab} onLogout={onLogout}>
       
-      {/* Dienstplan */}
       {tab === 'schedule' && (
         <RosterScheduler 
             user={user} 
             companyId={user.companyId} 
-            employees={[{id: user.uid, ...user}]} 
-            // Wir geben die Funktionen auch an den Scheduler weiter, falls dort Buttons sind
+            employees={currentUserAsArray}  // Nutzen wir nun das memoized Array
             onImageUpload={handleImageUpload}
             onImageDelete={handleDeleteImage}
         />
       )}
 
-      {/* TEAM PLANUNG (Nur für Leads) */}
       {tab === 'team_planning' && isLead && (
           <div className="h-[calc(100vh-140px)]">
               <SchedulePlanner 
@@ -153,7 +143,6 @@ export const EmployeeDashboard = ({ user, onLogout }) => {
           </div>
       )}
 
-      {/* Anträge */}
       {tab === 'requests' && (
         <div className="space-y-6">
           <div className="flex justify-between items-center">
@@ -175,12 +164,10 @@ export const EmployeeDashboard = ({ user, onLogout }) => {
         </div>
       )}
 
-      {/* MEINE AKTE (Hier ist der neue Bild-Upload/Löschen Bereich) */}
       {tab === 'files' && (
         <div className="max-w-xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4">
             <Card className="p-8 flex flex-col items-center gap-6">
                 <div className="relative group h-32 w-32">
-                    {/* Das Bild */}
                     <div className="h-32 w-32 rounded-full overflow-hidden bg-slate-100 border-4 border-white shadow-lg">
                         {user.imageUrl ? (
                             <img src={user.imageUrl} className="h-full w-full object-cover" alt="Profil" />
@@ -191,16 +178,11 @@ export const EmployeeDashboard = ({ user, onLogout }) => {
                         )}
                     </div>
 
-                    {/* Overlay mit Upload UND Löschen Button */}
                     <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity gap-4">
-                        
-                        {/* 1. Upload Button */}
                         <label className="cursor-pointer text-white hover:text-blue-300 hover:scale-110 transition-all p-2 bg-white/10 rounded-full backdrop-blur-sm" title="Bild hochladen">
                             <Upload size={20}/>
                             <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload}/>
                         </label>
-
-                        {/* 2. Löschen Button (nur wenn Bild da ist) */}
                         {user.imageUrl && (
                             <button onClick={handleDeleteImage} className="text-white hover:text-red-400 hover:scale-110 transition-all p-2 bg-white/10 rounded-full backdrop-blur-sm" title="Bild löschen">
                                 <Trash2 size={20}/>

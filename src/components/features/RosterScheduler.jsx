@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Download, Mail, Phone, MapPin, Clock, Info, User, Save, Upload, CreditCard, Shirt, FileText, Car, X } from 'lucide-react'; // X hinzugefügt
+import { ChevronLeft, ChevronRight, Download, Mail, Phone, MapPin, Clock, Info, User, Save, Upload, CreditCard, Shirt, FileText, Car, X, Loader2 } from 'lucide-react'; 
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -18,9 +18,8 @@ export const RosterScheduler = ({ user, employees = [], companyId, targetUserId,
   const [shifts, setShifts] = useState([]);
   const [objects, setObjects] = useState([]);
   const [selectedShift, setSelectedShift] = useState(null);
-  
-  // NEU: State für Bild-Vergrößerung
   const [showImageModal, setShowImageModal] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const activeUserId = targetUserId || user.uid;
   const activeUser = employees.find(e => e.id === activeUserId) || { name: "Mitarbeiter" };
@@ -30,21 +29,9 @@ export const RosterScheduler = ({ user, employees = [], companyId, targetUserId,
   const [formData, setFormData] = useState({});
 
   useEffect(() => {
-      if (activeUser) {
-          setFormData({
-              phone: activeUser.phone || '',
-              address: activeUser.address || '',
-              iban: activeUser.iban || '',
-              taxId: activeUser.taxId || '',
-              shirtSize: activeUser.shirtSize || 'M',
-              hasLicense: activeUser.hasLicense || false
-          });
-      }
-  }, [activeUser]);
-
-  useEffect(() => {
     if (!companyId) return;
     const loadData = async () => {
+        setIsLoading(true);
         const start = startOfWeek(startOfMonth(date), { weekStartsOn: 1 }).toISOString().split('T')[0];
         const end = endOfWeek(endOfMonth(date), { weekStartsOn: 1 }).toISOString().split('T')[0];
         
@@ -54,9 +41,24 @@ export const RosterScheduler = ({ user, employees = [], companyId, targetUserId,
 
         const snapObjs = await getDocs(collection(db, "companies", companyId, "objects"));
         setObjects(snapObjs.docs.map(d => ({ id: d.id, ...d.data() })));
+        setIsLoading(false);
     };
     loadData();
   }, [date, companyId]);
+
+  // Wir lösen die Abhängigkeiten hier auf, damit kein Neuladen erzwungen wird
+  useEffect(() => {
+      if (activeUser.id) {
+          setFormData({
+              phone: activeUser.phone || '',
+              address: activeUser.address || '',
+              iban: activeUser.iban || '',
+              taxId: activeUser.taxId || '',
+              shirtSize: activeUser.shirtSize || 'M',
+              hasLicense: activeUser.hasLicense || false
+          });
+      }
+  }, [activeUser.id, activeUser.phone, activeUser.address, activeUser.iban, activeUser.taxId, activeUser.shirtSize, activeUser.hasLicense]);
 
   const handleSave = () => {
       if (onSaveProfile) {
@@ -99,8 +101,6 @@ export const RosterScheduler = ({ user, employees = [], companyId, targetUserId,
       {/* LINKE SPALTE: PROFIL */}
       <Card className="w-full lg:w-80 flex-shrink-0 p-6 flex flex-col h-fit bg-white border-slate-200 shadow-md">
         <div className="flex flex-col items-center text-center relative">
-            
-            {/* PROFILBILD LOGIK GEÄNDERT */}
             <div className="relative group mb-4">
                 <div 
                     onClick={() => !isEditing && setShowImageModal(true)} 
@@ -109,7 +109,6 @@ export const RosterScheduler = ({ user, employees = [], companyId, targetUserId,
                     <Avatar src={activeUser.imageUrl} alt={activeUser.name} size="xl" className="shadow-lg border-4 border-slate-50"/>
                 </div>
 
-                {/* Upload nur anzeigen wenn EDITING aktiv ist */}
                 {isOwnProfile && isEditing && (
                     <label className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-xl cursor-pointer text-white animate-in fade-in">
                         <Upload size={24}/>
@@ -126,12 +125,7 @@ export const RosterScheduler = ({ user, employees = [], companyId, targetUserId,
             <div className="text-xs text-slate-500 mt-1 mb-4">{activeUser.email}</div>
 
             {isOwnProfile && onSaveProfile && (
-                <Button 
-                    size="sm" 
-                    variant={isEditing ? "ghost" : "outline"} 
-                    className="w-full mb-4"
-                    onClick={() => setIsEditing(!isEditing)}
-                >
+                <Button size="sm" variant={isEditing ? "ghost" : "outline"} className="w-full mb-4" onClick={() => setIsEditing(!isEditing)}>
                     {isEditing ? "Abbrechen" : "Profil bearbeiten"}
                 </Button>
             )}
@@ -184,49 +178,93 @@ export const RosterScheduler = ({ user, employees = [], companyId, targetUserId,
           </div>
         </div>
         <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50">{['Mo','Di','Mi','Do','Fr','Sa','So'].map(d=><div key={d} className="py-2 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">{d}</div>)}</div>
-        <div className="grid grid-cols-7 auto-rows-fr bg-slate-200 gap-px flex-1">
-          {days.map(d => {
-            const dStr = format(d, 'yyyy-MM-dd');
-            const isToday = isSameDay(d, new Date());
-            const dayShifts = shifts.filter(s => s.date === dStr && s.employeeId === activeUserId);
-            return (
-              <div key={dStr} className={`bg-white p-1 min-h-[80px] flex flex-col ${!isSameMonth(d, date) ? 'bg-slate-50/50 text-slate-300' : ''} ${isToday ? 'bg-blue-50/30' : ''}`}>
-                <span className={`text-[10px] font-bold w-6 h-6 flex items-center justify-center rounded-full ${isToday ? 'bg-blue-600 text-white shadow-sm' : ''}`}>{format(d, 'd')}</span>
-                <div className="flex-1 flex flex-col justify-end gap-1 mt-1">
-                  {dayShifts.map((s, i) => {
-                    const obj = objects.find(o => o.id === s.objectId);
-                    return <div key={i} onClick={() => setSelectedShift({ ...s, objectDetails: obj })} className="bg-blue-600 text-white text-[9px] rounded px-1.5 py-1 truncate shadow-sm cursor-pointer hover:bg-blue-700 transition-colors">{s.startTime}-{s.endTime} {obj?.name || s.location}</div>;
-                  })}
+        
+        {/* Lade-Ansicht oder Kalender-Grid */}
+        {isLoading ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-slate-50 space-y-2">
+                <Loader2 className="animate-spin h-8 w-8 text-blue-500" />
+                <span className="text-sm font-medium">Lade Dienstplan...</span>
+            </div>
+        ) : (
+            <div className="grid grid-cols-7 auto-rows-fr bg-slate-200 gap-px flex-1">
+            {days.map(d => {
+                const dStr = format(d, 'yyyy-MM-dd');
+                const isToday = isSameDay(d, new Date());
+                const dayShifts = shifts.filter(s => s.date === dStr && s.employeeId === activeUserId);
+                return (
+                <div key={dStr} className={`bg-white p-1 min-h-[80px] flex flex-col ${!isSameMonth(d, date) ? 'bg-slate-50/50 text-slate-300' : ''} ${isToday ? 'bg-blue-50/30' : ''}`}>
+                    <span className={`text-[10px] font-bold w-6 h-6 flex items-center justify-center rounded-full ${isToday ? 'bg-blue-600 text-white shadow-sm' : ''}`}>{format(d, 'd')}</span>
+                    <div className="flex-1 flex flex-col justify-end gap-1 mt-1">
+                    {dayShifts.map((s, i) => {
+                        const obj = objects.find(o => o.id === s.objectId);
+                        return <div key={i} onClick={() => setSelectedShift({ ...s, objectDetails: obj })} className="bg-blue-600 text-white text-[9px] rounded px-1.5 py-1 truncate shadow-sm cursor-pointer hover:bg-blue-700 transition-colors">{s.startTime}-{s.endTime} {obj?.name || s.location}</div>;
+                    })}
+                    </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+                );
+            })}
+            </div>
+        )}
       </Card>
 
       {/* DETAIL MODAL SCHICHT */}
       {selectedShift && (
         <Modal title="Einsatz-Details" onClose={() => setSelectedShift(null)}>
             <div className="space-y-4">
-                <div className="flex items-center gap-3 bg-blue-50 p-3 rounded-lg border border-blue-100">
-                    <Clock className="text-blue-600 h-5 w-5"/>
+                
+                {/* NEU: Großes, klares Zeit-Banner */}
+                <div className="bg-blue-600 text-white p-4 rounded-xl shadow-md flex items-center gap-4">
+                    <div className="bg-white/20 p-3 rounded-full shrink-0">
+                        <Clock className="text-white h-8 w-8"/>
+                    </div>
                     <div>
-                        <div className="text-xs font-bold text-slate-500 uppercase">Zeit</div>
-                        <div className="font-bold text-slate-900">{format(new Date(selectedShift.date), 'dd.MM.yyyy')} | {selectedShift.startTime} - {selectedShift.endTime} Uhr</div>
+                        <div className="text-blue-100 text-xs font-bold uppercase tracking-wider mb-0.5">Dienstzeit</div>
+                        <div className="text-lg font-black">{format(new Date(selectedShift.date), 'EEEE, dd.MM.yyyy', { locale: de })}</div>
+                        <div className="text-base font-medium opacity-90">{selectedShift.startTime} Uhr - {selectedShift.endTime} Uhr</div>
                     </div>
                 </div>
-                <div className="border-t border-slate-100 pt-4 space-y-3">
-                    <div><div className="text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-1"><MapPin size={12}/> Objekt</div><div className="font-bold text-lg text-slate-900">{selectedShift.objectDetails?.name || selectedShift.location || "Unbekannt"}</div>{selectedShift.objectDetails?.address && <div className="text-slate-600 text-sm">{selectedShift.objectDetails.address}</div>}</div>
-                    {selectedShift.objectDetails?.client && <div><div className="text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-1"><User size={12}/> Auftraggeber</div><div className="text-slate-800 text-sm">{selectedShift.objectDetails.client}</div></div>}
-                    {selectedShift.objectDetails?.uniform && <div><div className="text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-1"><Info size={12}/> Dienstkleidung</div><div className="bg-slate-100 px-2 py-1 rounded text-sm text-slate-700 inline-block">{selectedShift.objectDetails.uniform}</div></div>}
-                    {selectedShift.objectDetails?.notes && <div className="bg-yellow-50 border border-yellow-100 p-3 rounded-lg"><div className="text-xs font-bold text-yellow-700 uppercase mb-1">Wichtige Infos</div><div className="text-sm text-yellow-900 whitespace-pre-wrap">{selectedShift.objectDetails.notes}</div></div>}
+
+                <div className="border border-slate-100 rounded-xl p-4 space-y-4 bg-white shadow-sm">
+                    {/* Ort */}
+                    <div>
+                        <div className="text-xs font-bold text-slate-400 uppercase mb-1 flex items-center gap-1"><MapPin size={12}/> Objekt / Einsatzort</div>
+                        <div className="font-bold text-lg text-slate-900">{selectedShift.objectDetails?.name || selectedShift.location || "Unbekannt"}</div>
+                        {selectedShift.objectDetails?.address && <div className="text-slate-600 text-sm mt-0.5">{selectedShift.objectDetails.address}</div>}
+                    </div>
+                    
+                    {/* Auftraggeber */}
+                    {selectedShift.objectDetails?.client && (
+                        <div className="pt-3 border-t border-slate-100">
+                            <div className="text-xs font-bold text-slate-400 uppercase mb-1 flex items-center gap-1"><User size={12}/> Auftraggeber</div>
+                            <div className="text-slate-800 text-sm font-medium">{selectedShift.objectDetails.client}</div>
+                        </div>
+                    )}
+                    
+                    {/* Uniform */}
+                    {selectedShift.objectDetails?.uniform && (
+                        <div className="pt-3 border-t border-slate-100">
+                            <div className="text-xs font-bold text-slate-400 uppercase mb-1 flex items-center gap-1"><Shirt size={12}/> Dienstkleidung</div>
+                            <div className="bg-slate-100 px-3 py-1.5 rounded-md text-sm text-slate-700 inline-block font-medium">{selectedShift.objectDetails.uniform}</div>
+                        </div>
+                    )}
+                    
+                    {/* Notes */}
+                    {selectedShift.objectDetails?.notes && (
+                        <div className="pt-3 border-t border-slate-100">
+                            <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-lg">
+                                <div className="text-xs font-bold text-yellow-700 uppercase mb-1 flex items-center gap-1"><Info size={12}/> Wichtige Infos</div>
+                                <div className="text-sm text-yellow-900 whitespace-pre-wrap">{selectedShift.objectDetails.notes}</div>
+                            </div>
+                        </div>
+                    )}
                 </div>
-                <Button className="w-full mt-2" onClick={() => setSelectedShift(null)}>Schließen</Button>
+                
+                <Button className="w-full mt-2" variant="outline" onClick={() => setSelectedShift(null)}>Fenster schließen</Button>
             </div>
         </Modal>
       )}
 
-      {/* NEU: BILD VERGRÖßERUNGS MODAL (LIGHTBOX) */}
+      {/* BILD VERGRÖßERUNGS MODAL */}
       {showImageModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4 animate-in fade-in" onClick={() => setShowImageModal(false)}>
             <div className="relative max-w-4xl w-full h-full flex items-center justify-center">
