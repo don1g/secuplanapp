@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, CalendarDays, Users, Mail, Plus, MapPin, CheckCircle2, FileText, Settings, Upload, Loader2, X, Trash2, LayoutGrid, Search, Filter, ArrowLeft } from 'lucide-react';
-import { collection, getDocs, setDoc, doc, addDoc, updateDoc, query, onSnapshot, deleteField, where } from 'firebase/firestore';
+import { 
+  LayoutDashboard, CalendarDays, Users, Mail, Plus, MapPin, 
+  CheckCircle2, FileText, Settings, Upload, Loader2, X, 
+  Trash2, LayoutGrid, Search, Filter, ArrowLeft, Phone, Globe, Ban 
+} from 'lucide-react';
+import { 
+  collection, doc, addDoc, updateDoc, query, onSnapshot, 
+  deleteField, where, setDoc, getDocs, increment 
+} from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { EMP_ROLES } from '../utils/constants';
@@ -27,7 +34,7 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
   const [requests, setRequests] = useState([]);
   const [internalProfileId, setInternalProfileId] = useState(null);
 
-  // Marktplatz Logik aus GitHub
+  // Marktplatz States (Wichtig für die Funktion aus GitHub)
   const [firms, setFirms] = useState([]);
   const [selectedFirm, setSelectedFirm] = useState(null);
   const [firmPosts, setFirmPosts] = useState([]);
@@ -35,18 +42,34 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
-    const unsubComp = onSnapshot(doc(db, "companies", user.uid), (doc) => { setData(doc.data()); });
+    if (!user?.uid) return;
+
+    // 1. Echtzeit-Daten der EIGENEN Firma [aus GitHub Logik]
+    const unsubComp = onSnapshot(doc(db, "companies", user.uid), (docSnap) => { 
+        if (docSnap.exists()) {
+            setData({ 
+                address: "", phone: "", publicEmail: "", isVisible: false, showPrice: true,
+                ...docSnap.data() 
+            }); 
+        }
+    });
+
+    // 2. Mitarbeiter Liste
     const unsubEmp = onSnapshot(collection(db, "companies", user.uid, "employees"), (snap) => {
         setEmployees(snap.docs.map(d => ({id: d.id, ...d.data()})));
     });
-    const qPosts = query(collection(db, "companies", user.uid, "posts"));
-    const unsubPosts = onSnapshot(qPosts, (snap) => {
+
+    // 3. Eigene Posts laden
+    const unsubPosts = onSnapshot(query(collection(db, "companies", user.uid, "posts")), (snap) => {
         setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.createdAt - a.createdAt));
     });
+
+    // 4. Anträge (Requests) laden
     const unsubReq = onSnapshot(collection(db, "companies", user.uid, "requests"), (snap) => {
         setRequests(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
+    // 5. Marktplatz Firmen laden [Funktion aus GitHub]
     const loadMarketplace = async () => {
         setMarketLoading(true);
         const q = query(collection(db, "companies"), where("isVisible", "==", true));
@@ -57,21 +80,23 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
     loadMarketplace();
 
     return () => { unsubComp(); unsubEmp(); unsubPosts(); unsubReq(); };
-  }, [user]);
+  }, [user.uid]);
 
-  useEffect(() => { setTab(initialTab); }, [initialTab]);
-
+  // Effekt für Marktplatz-Details
   useEffect(() => {
     if (selectedFirm) {
-        const loadPosts = async () => {
+        const loadFirmContent = async () => {
             const q = query(collection(db, "companies", selectedFirm.id, "posts"));
             const snap = await getDocs(q);
             setFirmPosts(snap.docs.map(d => ({id: d.id, ...d.data()})));
         };
-        loadPosts();
+        loadFirmContent();
     }
   }, [selectedFirm]);
 
+  useEffect(() => { setTab(initialTab); }, [initialTab]);
+
+  // Handlers
   const handleViewProfile = (id) => {
       if (onViewProfile) onViewProfile(id);
       else setInternalProfileId(id);
@@ -86,13 +111,15 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
   };
 
   const handleSaveProfile = async () => { 
-      setUploading(true); let url = data.imageUrl; 
+      setUploading(true); 
+      let url = data.imageUrl; 
       if (imageUpload) { 
-          const imageRef = ref(storage, `logos/${user.uid}`); await uploadBytes(imageRef, imageUpload); 
+          const imageRef = ref(storage, `logos/${user.uid}`); 
+          await uploadBytes(imageRef, imageUpload); 
           url = await getDownloadURL(imageRef); 
       } 
       await setDoc(doc(db, "companies", user.uid), { ...data, imageUrl: url }, { merge: true }); 
-      setImageUpload(null); setUploading(false); setIsEditing(false); 
+      setImageUpload(null); setIsEditing(false); setUploading(false);
   };
 
   const handleDeleteImage = async (e) => {
@@ -102,7 +129,6 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
     try {
         await updateDoc(doc(db, "companies", user.uid), { imageUrl: deleteField() });
         setData(prev => ({ ...prev, imageUrl: null }));
-        setImageUpload(null);
     } catch(err) { console.error(err); }
     setUploading(false);
   };
@@ -120,101 +146,115 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
       await updateDoc(doc(db, "companies", user.uid, "requests", reqId), { status: newStatus });
   };
 
-  const filteredFirms = firms.filter(f => 
-    !searchTerm || f.name.toLowerCase().includes(searchTerm.toLowerCase()) || f.description?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
   const menu = [
-    { id: 'dashboard', name: 'Mein Profil', icon: <LayoutDashboard size={20}/> },
-    { id: 'marketplace', name: 'Marktplatz', icon: <LayoutGrid size={20}/> },
+    { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard size={20}/> },
+    { id: 'marketplace', name: 'Marktplatz', icon: <Globe size={20}/> },
     { id: 'schedule', name: 'Dienstplan', icon: <CalendarDays size={20}/> },
     { id: 'staff', name: 'Personal', icon: <Users size={20}/> },
     { id: 'req_manage', name: 'Anträge', icon: <CheckCircle2 size={20}/> },
     { id: 'messages', name: 'Nachrichten', icon: <Mail size={20}/> }
   ];
 
-  if (!data) return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-blue-600"/></div>;
+  if (!data) return <div className="flex h-screen items-center justify-center"><Loader2 className="animate-spin text-blue-600 w-12 h-12"/></div>;
 
   if (internalProfileId) {
       return (
-          <DashboardLayout title="Profilansicht" user={{...user, ...data}} sidebarItems={menu} activeTab={tab} onTabChange={setTab} onLogout={onLogout}>
+          <DashboardLayout title="Profil" user={{...user, ...data}} sidebarItems={menu} activeTab={tab} onTabChange={setTab} onLogout={onLogout}>
               <UserProfileView targetUserId={internalProfileId} onBack={() => setInternalProfileId(null)} />
           </DashboardLayout>
       );
   }
 
   return (
-    <DashboardLayout title="Firmen Verwaltung" user={{...user, ...data}} sidebarItems={menu} activeTab={tab} onTabChange={(t) => {setTab(t); setSelectedFirm(null);}} onLogout={onLogout}>
+    <DashboardLayout title="Verwaltung" user={{...user, ...data}} sidebarItems={menu} activeTab={tab} onTabChange={(t) => {setTab(t); setSelectedFirm(null);}} onLogout={onLogout}>
       
+      {/* TAB: DASHBOARD (Design nach Screenshot 203605.png) */}
       {tab === 'dashboard' && (
-        <div className="space-y-6 animate-in fade-in">
-            <div className={`bg-white rounded-2xl shadow-xl border overflow-hidden relative group ${isEditing ? 'ring-2 ring-blue-500' : 'border-slate-200'}`}>
-                <div className="h-32 bg-gradient-to-r from-blue-600 to-blue-400 relative">
-                    <div className="absolute top-4 right-4 z-10 flex gap-2">
+        <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in duration-500">
+            <div className="bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 overflow-hidden">
+                <div className="h-56 bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-500 relative">
+                    <div className="absolute top-8 right-10 z-10 flex gap-4">
                         {isEditing ? (
                             <>
-                                <Button size="sm" variant="outline" onClick={() => {setIsEditing(false); setImageUpload(null);}}>Abbrechen</Button>
-                                <Button size="sm" variant="success" onClick={handleSaveProfile} disabled={uploading}>{uploading ? 'Lädt...' : 'Speichern'}</Button>
+                                <button className="bg-white/10 backdrop-blur-md border border-white/20 text-white px-6 py-2.5 rounded-2xl font-bold hover:bg-white/20 transition-all uppercase text-[10px] tracking-widest" onClick={() => setIsEditing(false)}>Abbrechen</button>
+                                <Button variant="success" className="shadow-2xl shadow-green-200" onClick={handleSaveProfile}>{uploading ? 'Lädt...' : 'Profil speichern'}</Button>
                             </>
                         ) : (
-                            <button onClick={() => setIsEditing(true)} className="bg-white/20 backdrop-blur text-white border border-white/40 hover:bg-white hover:text-blue-600 font-bold px-4 py-2 rounded-lg text-sm transition-all flex items-center gap-2 shadow-sm"><Settings size={16}/> Bearbeiten</button>
+                            <button onClick={() => setIsEditing(true)} className="bg-white/20 backdrop-blur-xl text-white border border-white/30 hover:bg-white hover:text-blue-600 font-black px-8 py-4 rounded-[1.5rem] text-xs transition-all flex items-center gap-3 uppercase tracking-[0.15em] shadow-2xl">
+                                <Settings size={18}/> Profil bearbeiten
+                            </button>
                         )}
                     </div>
                 </div>
-                <div className="relative px-8 pb-8">
-                    <div className="absolute -top-12 left-8 p-1 bg-white rounded-2xl shadow-md border border-slate-200 group/logo">
-                        <div className="h-24 w-24 rounded-xl overflow-hidden bg-slate-100 flex items-center justify-center relative">
-                            <div onClick={() => !isEditing && setShowImageModal(true)} className={`w-full h-full ${!isEditing ? 'cursor-zoom-in' : ''}`}>
-                                {imageUpload ? <img src={URL.createObjectURL(imageUpload)} className="h-full w-full object-cover opacity-50"/> : <Avatar src={data.imageUrl} alt={data.name} size="full" className="w-full h-full rounded-none"/>}
+                <div className="px-12 pb-12">
+                    <div className="relative flex flex-col md:flex-row items-end gap-10 -mt-24">
+                        <div className="relative group">
+                            <div onClick={() => !isEditing && setShowImageModal(true)} className={`h-48 w-48 rounded-[3rem] overflow-hidden bg-white p-2 shadow-2xl border border-slate-50 transition-all duration-500 ${!isEditing ? 'cursor-zoom-in hover:scale-105' : ''}`}>
+                                <Avatar src={data.imageUrl} alt={data.name} size="full" className="rounded-[2.6rem]" />
                             </div>
                             {isEditing && (
-                                <div className="absolute inset-0 flex items-center justify-center bg-black/40 gap-4 animate-in fade-in rounded-xl text-white">
-                                    <label className="cursor-pointer hover:text-blue-200 transition-colors"><Upload size={24}/><input type="file" className="hidden" onChange={(e) => setImageUpload(e.target.files[0])} /></label>
-                                    {(data.imageUrl || imageUpload) && <button onClick={handleDeleteImage} className="hover:text-red-500 transition-colors"><Trash2 size={24}/></button>}
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-[3rem] gap-6 text-white animate-in fade-in">
+                                    <label className="cursor-pointer hover:text-blue-300 transition-transform hover:scale-125"><Upload size={32}/><input type="file" className="hidden" onChange={(e) => setImageUpload(e.target.files[0])} /></label>
+                                    {data.imageUrl && <button onClick={handleDeleteImage} className="hover:text-red-400 transition-transform hover:scale-125"><Trash2 size={32}/></button>}
                                 </div>
                             )}
                         </div>
-                    </div>
-                    <div className="pt-16 flex flex-col md:flex-row justify-between items-start gap-4">
-                        <div className="flex-1 w-full">
-                            {isEditing ? <input type="text" value={data.name} onChange={(e) => setData({...data, name: e.target.value})} className="text-3xl font-bold text-slate-900 mb-1 w-full border-b-2 border-blue-500 outline-none" /> : <h1 className="text-3xl font-bold text-slate-900 mb-1">{data.name}</h1>}
-                            <div className="flex flex-wrap gap-4 text-sm text-slate-500 mt-2 items-center">
-                                <div className="flex items-center gap-1"><MapPin size={16}/> {isEditing ? <input value={data.address} onChange={(e) => setData({...data, address: e.target.value})} className="border-b border-blue-300 outline-none" /> : (data.address || "Keine Adresse")}</div>
-                                <div className="flex items-center gap-1"><Users size={16}/> {employees.length} Mitarbeiter</div>
-                                <div className="flex items-center gap-1"><Mail size={16}/> {isEditing ? <input value={data.publicEmail} onChange={(e) => setData({...data, publicEmail: e.target.value})} className="border-b border-blue-300 outline-none" /> : (data.publicEmail || user.email)}</div>
+                        <div className="flex-1 pb-4">
+                            {isEditing ? (
+                                <input type="text" value={data.name} onChange={(e) => setData({...data, name: e.target.value})} className="text-5xl font-black text-slate-900 mb-4 w-full bg-slate-50 rounded-2xl px-6 py-3 border-none focus:ring-4 focus:ring-blue-100 outline-none transition-all" />
+                            ) : (
+                                <h1 className="text-5xl font-black text-slate-900 tracking-tight mb-4">{data.name}</h1>
+                            )}
+                            <div className="flex flex-wrap gap-4">
+                                <div className="flex items-center gap-2 bg-slate-50 text-slate-500 px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest border border-slate-100"><MapPin size={16} className="text-blue-500"/> {data.address || "Standort fehlt"}</div>
+                                <div className="flex items-center gap-2 bg-slate-50 text-slate-500 px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest border border-slate-100"><Users size={16} className="text-blue-500"/> {employees.length} Teammitglieder</div>
+                                <div className="flex items-center gap-2 bg-slate-50 text-slate-500 px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest border border-slate-100"><Badge color={data.isVisible ? 'green' : 'red'} className="rounded-xl px-4">{data.isVisible ? 'Aktiv' : 'Inaktiv'}</Badge></div>
                             </div>
-                        </div>
-                        <div className="text-right">
-                            <div className="text-2xl font-bold text-blue-600">{isEditing ? <input type="number" value={data.price} onChange={(e) => setData({...data, price: e.target.value})} className="w-20 text-right border-b border-blue-300 outline-none"/> : data.price}€ <span className="text-sm text-slate-500 font-normal">/ Std.</span></div>
-                            <div className={`inline-block mt-1 ${data.isVisible ? 'bg-green-50 text-green-600 border-green-200' : 'bg-slate-100 text-slate-500 border-slate-200'} border text-xs font-bold px-3 py-1 rounded-full`}>{data.isVisible ? 'Öffentlich sichtbar' : 'Versteckt'}</div>
                         </div>
                     </div>
                 </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="md:col-span-2 space-y-6">
-                    <Card className="p-6">
-                        <h3 className="font-bold text-lg text-slate-900 mb-4 border-b border-slate-200 pb-2">Über uns</h3>
-                        {isEditing ? <textarea value={data.description} onChange={(e) => setData({...data, description: e.target.value})} className="w-full h-32 p-3 bg-slate-50 rounded-xl outline-none border focus:border-blue-500" /> : <p className="text-slate-600 leading-relaxed whitespace-pre-wrap">{data.description || "Keine Beschreibung hinterlegt."}</p>}
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+                <div className="lg:col-span-2 space-y-10">
+                    <Card className="p-10 rounded-[2.5rem] border-slate-100 shadow-2xl">
+                        <h3 className="font-black text-2xl text-slate-900 uppercase tracking-tight mb-8">Unternehmensprofil</h3>
+                        {isEditing ? (
+                            <textarea value={data.description} onChange={(e) => setData({...data, description: e.target.value})} className="w-full h-64 p-8 bg-slate-50 rounded-[2rem] border-none focus:ring-4 focus:ring-blue-50 outline-none text-slate-700 leading-relaxed font-medium transition-all" />
+                        ) : (
+                            <p className="text-slate-600 leading-loose font-medium text-lg whitespace-pre-wrap">{data.description || "Beschreiben Sie Ihr Unternehmen..."}</p>
+                        )}
                     </Card>
-                    <Card className="p-6">
-                        <h3 className="font-bold text-lg text-slate-900 mb-4 flex items-center gap-2"><FileText size={20} className="text-blue-600"/> Neuigkeiten</h3>
+                    <Card className="p-10 rounded-[2.5rem] border-slate-100 shadow-2xl">
+                        <h3 className="font-black text-2xl text-slate-900 uppercase tracking-tight mb-10 flex items-center gap-4">Newsfeed</h3>
                         {!isEditing && (
-                            <div className="mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                <textarea className="w-full bg-white border border-slate-200 rounded-lg p-3 text-sm focus:border-blue-500 outline-none resize-none" rows="2" placeholder="Was gibt es Neues?" value={newPostContent} onChange={e => setNewPostContent(e.target.value)} />
-                                <div className="flex justify-end mt-2"><Button size="sm" onClick={handleCreatePost}>Posten</Button></div>
+                            <div className="mb-10 bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100 shadow-inner">
+                                <textarea className="w-full bg-white rounded-3xl p-6 text-base font-medium border-none shadow-sm outline-none focus:ring-4 focus:ring-blue-100 transition-all resize-none" rows="3" placeholder="Was gibt es Neues?" value={newPostContent} onChange={e => setNewPostContent(e.target.value)} />
+                                <div className="flex justify-end mt-6"><Button className="rounded-2xl px-12 py-4 shadow-2xl shadow-blue-100 font-black uppercase tracking-widest text-xs" onClick={handleCreatePost}>Veröffentlichen</Button></div>
                             </div>
                         )}
-                        <div className="space-y-4">{posts.length === 0 ? <div className="text-slate-500 text-sm italic text-center">Keine Beiträge.</div> : posts.map(post => <PostItem key={post.id} post={post} companyId={user.uid} currentUserId={user.uid} />)}</div>
+                        <div className="space-y-8">{posts.map(post => <PostItem key={post.id} post={post} companyId={user.uid} currentUserId={user.uid} />)}</div>
                     </Card>
                 </div>
-                <div className="space-y-6">
-                    <Card className="p-6">
-                        <h3 className="font-bold text-sm text-slate-500 uppercase mb-4">Statistik</h3>
-                        <div className="space-y-4">
-                            <div className="flex justify-between"><span className="flex gap-2 items-center text-slate-700"><Users size={16}/> Mitarbeiter</span> <span className="font-bold">{employees.length}</span></div>
-                            <div className="flex justify-between"><span className="flex gap-2 items-center text-slate-700"><FileText size={16}/> Beiträge</span> <span className="font-bold">{posts.length}</span></div>
-                            <div className="pt-4 border-t mt-4">{isEditing && <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={data.isVisible} onChange={e => setData({...data, isVisible: e.target.checked})}/> Profil öffentlich sichtbar machen</label>}</div>
+                <div className="space-y-10">
+                    <Card className="p-10 rounded-[2.5rem] border-slate-100 shadow-2xl bg-slate-900 text-white">
+                        <h3 className="font-black text-[10px] uppercase tracking-[0.3em] text-slate-500 mb-8">Konditionen</h3>
+                        <div className="space-y-6">
+                            <div className="bg-white/5 p-6 rounded-[1.5rem] border border-white/10">
+                                <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Stundensatz</div>
+                                <div className="text-4xl font-black text-blue-400">{data.price}€</div>
+                            </div>
+                            {isEditing && (
+                                <div className="pt-6 border-t border-white/10">
+                                    <label className="flex items-center justify-between cursor-pointer group">
+                                        <span className="text-xs font-black uppercase tracking-widest text-slate-400 group-hover:text-white transition-colors">Sichtbarkeit</span>
+                                        <div className={`w-14 h-7 rounded-full transition-all relative p-1 ${data.isVisible ? 'bg-green-500' : 'bg-slate-700'}`}>
+                                            <div className={`w-5 h-5 bg-white rounded-full transition-all duration-300 transform ${data.isVisible ? 'translate-x-7' : 'translate-x-0'}`}></div>
+                                        </div>
+                                        <input type="checkbox" className="hidden" checked={data.isVisible} onChange={e => setData({...data, isVisible: e.target.checked})}/>
+                                    </label>
+                                </div>
+                            )}
                         </div>
                     </Card>
                 </div>
@@ -222,102 +262,93 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard', on
         </div>
       )}
 
-      {tab === 'marketplace' && !selectedFirm && (
-        <div className="space-y-4 animate-in fade-in">
-          <div className="flex gap-2">
-            <div className="flex-1 relative"><Search className="absolute left-3 top-3 text-slate-400" size={18}/><input className="w-full pl-10 p-3 rounded-xl border border-slate-200 outline-none focus:border-blue-500 text-slate-900" placeholder="Firma suchen..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}/></div>
-            <Button icon={Filter} variant="outline">Filter</Button>
-          </div>
-          {marketLoading ? <div className="flex justify-center p-10"><Loader2 className="animate-spin text-blue-600"/></div> : (
-            <div className="space-y-4">
-                {filteredFirms.map(f => (
-                <Card key={f.id} onClick={() => setSelectedFirm(f)} className="p-4 flex gap-4 cursor-pointer hover:border-blue-400 transition-all">
-                    <Avatar src={f.imageUrl} alt={f.name} size="lg" />
-                    <div>
-                        <h3 className="font-bold text-lg text-slate-900">{f.name} {f.id === user.uid && <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full ml-2">(Du)</span>}</h3>
-                        <div className="text-sm text-slate-500 flex gap-2 mb-2 items-center"><MapPin size={14}/> {f.address || "Keine Adresse"}</div>
-                        <div className="text-blue-600 font-bold bg-blue-50 inline-block px-2 py-0.5 rounded text-sm">{f.showPrice !== false ? `ab ${f.price}€ / Std` : 'Preis auf Anfrage'}</div>
-                    </div>
-                </Card>
-                ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab === 'marketplace' && selectedFirm && (
-        <div className="space-y-6 animate-in fade-in">
-          <Button variant="ghost" onClick={() => setSelectedFirm(null)} icon={ArrowLeft} size="sm">Zurück</Button>
-          <Card className="overflow-hidden">
-            <div className="h-32 bg-gradient-to-r from-blue-600 to-blue-400"></div>
-            <div className="px-8 pb-6 -mt-10 flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
-              <div className="flex items-end gap-4">
-                  <Avatar src={selectedFirm.imageUrl} alt={selectedFirm.name} size="xl" className="bg-white border-4 border-white shadow-md"/>
-                  <div className="mb-2"><h1 className="text-2xl font-bold text-slate-900">{selectedFirm.name}</h1><p className="text-slate-500 flex items-center gap-1"><MapPin size={14}/> {selectedFirm.address}</p></div>
-              </div>
-            </div>
-            <div className="p-8 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-8">
-                <div className="md:col-span-2 space-y-6">
-                    <div><h3 className="font-bold text-slate-900 mb-2">Über uns</h3><p className="text-slate-600 leading-relaxed">{selectedFirm.description || "Keine Beschreibung verfügbar."}</p></div>
-                    <div><h3 className="font-bold text-slate-900 mb-4">Neuigkeiten</h3>{firmPosts.length > 0 ? firmPosts.map(p => <PostItem key={p.id} post={p} companyId={selectedFirm.id} currentUserId={user.uid} />) : <div className="text-slate-400 italic">Keine Beiträge.</div>}</div>
-                </div>
-                <div><Card className="p-4 bg-slate-50 border-slate-200"><div className="text-xs font-bold text-slate-500 uppercase mb-1">Stundensatz</div><div className="text-2xl font-bold text-blue-600 mb-4">{selectedFirm.price}€</div></Card></div>
-            </div>
-          </Card>
-        </div>
-      )}
-
+      {/* TAB: PERSONAL (Logik aus GitHub + Screenshot Design) */}
       {tab === 'staff' && (
-        <div className="space-y-4">
-          <div className="flex justify-end"><Button onClick={handleInvite} icon={Plus}>Mitarbeiter einladen</Button></div>
-          <Card className="overflow-hidden">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 text-slate-500 font-semibold"><tr><th className="p-4">Name</th><th className="p-4">Rolle</th><th className="p-4">Status</th><th className="p-4 text-right">Aktion</th></tr></thead>
-              <tbody className="divide-y divide-slate-100">
-                {employees.map(e => (
-                    <tr key={e.id} className="hover:bg-slate-50">
-                        <td className="p-4 font-bold text-slate-700 cursor-pointer hover:text-blue-600" onClick={() => handleViewProfile(e.id)}>{e.name} <div className="text-xs font-normal text-slate-400">{e.email}</div></td>
-                        <td className="p-4"><Badge color="blue">{EMP_ROLES[e.role]?.label || e.role}</Badge></td>
-                        <td className="p-4"><Badge color="green">Aktiv</Badge></td>
-                        <td className="p-4 text-right"><Button variant="ghost" size="sm" onClick={() => handleViewProfile(e.id)}>Profil</Button></td>
-                    </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-        </div>
+          <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in duration-500">
+              <div className="flex justify-between items-center bg-white p-10 rounded-[2.5rem] shadow-2xl border border-slate-100">
+                  <div>
+                      <h3 className="text-3xl font-black text-slate-900 tracking-tight">Personalstamm</h3>
+                      <p className="text-slate-400 font-bold text-xs uppercase tracking-widest mt-1">Verwalten Sie Ihr Team und Rollen.</p>
+                  </div>
+                  <Button className="rounded-2xl px-10 py-5 shadow-2xl shadow-blue-100 bg-blue-600 hover:bg-blue-700 transition-all font-black uppercase tracking-widest text-[10px]" onClick={handleInvite} icon={Plus}>Personal einladen</Button>
+              </div>
+              <Card className="rounded-[2.5rem] overflow-hidden border-slate-100 shadow-2xl bg-white">
+                  <table className="w-full text-left">
+                      <thead className="bg-slate-50/50 text-slate-400 font-black uppercase tracking-[0.25em] text-[10px] border-b border-slate-100">
+                          <tr><th className="px-10 py-8">Mitarbeiter</th><th className="px-10 py-8">Position</th><th className="px-10 py-8">Status</th><th className="px-10 py-8 text-right"></th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                          {employees.map(e => (
+                              <tr key={e.id} className="group hover:bg-slate-50/30 transition-all">
+                                  <td className="px-10 py-8">
+                                      <div className="flex items-center gap-5">
+                                          <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 flex items-center justify-center font-black text-blue-600 shadow-sm transition-all group-hover:scale-110">
+                                              {e.name.charAt(0)}
+                                          </div>
+                                          <div>
+                                              <div className="font-black text-slate-900 group-hover:text-blue-600 transition-colors text-base">{e.name}</div>
+                                              <div className="text-[11px] font-bold text-slate-400 lowercase tracking-tighter">{e.email}</div>
+                                          </div>
+                                      </div>
+                                  </td>
+                                  <td className="px-10 py-8"><Badge color="blue" className="px-5 py-1.5 uppercase text-[9px] font-black rounded-xl">{EMP_ROLES[e.role]?.label || e.role}</Badge></td>
+                                  <td className="px-10 py-8"><div className="flex items-center gap-3 text-green-500 font-black text-[10px] uppercase tracking-widest"><div className="h-2.5 w-2.5 bg-green-500 rounded-full shadow-[0_0_12px_rgba(34,197,94,0.6)]"></div> Aktiv</div></td>
+                                  <td className="px-10 py-8 text-right"><button onClick={() => handleViewProfile(e.id)} className="bg-slate-100 text-slate-600 hover:bg-blue-600 hover:text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-[0.15em] transition-all shadow-sm">Profil öffnen</button></td>
+                              </tr>
+                          ))}
+                      </tbody>
+                  </table>
+              </Card>
+          </div>
       )}
 
+      {/* TAB: DIENSTPLAN [Einbindung mit onViewProfile Fix] */}
+      {tab === 'schedule' && (
+          <div className="h-[calc(100vh-140px)] animate-in fade-in">
+              <SchedulePlanner 
+                employees={employees} 
+                companyId={user.uid} 
+                currentUser={user} 
+                onViewProfile={handleViewProfile} 
+              />
+          </div>
+      )}
+
+      {/* TAB: ANTRÄGE (Logik nach GitHub) */}
       {tab === 'req_manage' && (
-          <div className="space-y-4">
-              <h3 className="font-bold text-lg text-slate-800">Offene Anträge</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in">
+              <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight mb-8">Personal Anträge</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {requests.filter(r => r.status === 'Offen').map(req => (
-                      <div key={req.id} className="bg-white p-5 rounded-xl border border-l-4 border-l-orange-400 border-slate-200 shadow-sm">
-                          <div className="flex justify-between items-start mb-2"><span className="font-bold text-slate-800">{req.employeeName}</span><span className="text-xs text-slate-400">{new Date(req.date).toLocaleDateString()}</span></div>
-                          <div className="text-sm font-medium text-slate-600 mb-4">möchte <span className="text-slate-900 font-bold">{req.type}</span>{req.reason && <p className="mt-1 text-slate-500 italic">"{req.reason}"</p>}</div>
-                          <div className="flex gap-2">
-                              <button onClick={() => handleRequestAction(req.id, 'Genehmigt')} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-1"><CheckCircle2 size={16}/> Ja</button>
-                              <button onClick={() => handleRequestAction(req.id, 'Abgelehnt')} className="flex-1 bg-slate-100 hover:bg-red-100 hover:text-red-600 text-slate-600 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-1">Nein</button>
+                      <div key={req.id} className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-2xl flex flex-col justify-between">
+                          <div className="mb-6">
+                              <div className="flex justify-between items-start mb-4"><span className="font-black text-slate-900 text-lg leading-tight">{req.employeeName}</span><span className="text-[10px] font-black text-slate-400 uppercase">{new Date(req.date).toLocaleDateString()}</span></div>
+                              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100"><div className="text-[10px] font-black text-slate-400 uppercase mb-1">Anliegen</div><div className="font-bold text-slate-800">{req.type}</div></div>
+                          </div>
+                          <div className="flex gap-3">
+                              <button onClick={() => handleRequestAction(req.id, 'Genehmigt')} className="flex-1 bg-green-600 text-white py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-green-100 hover:bg-green-700 transition-all">Annehmen</button>
+                              <button onClick={() => handleRequestAction(req.id, 'Abgelehnt')} className="flex-1 bg-red-50 text-red-600 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-100 transition-all">Ablehnen</button>
                           </div>
                       </div>
                   ))}
-                  {requests.filter(r => r.status === 'Offen').length === 0 && <div className="col-span-full p-8 text-center text-slate-400">Keine offenen Anträge.</div>}
+                  {requests.filter(r => r.status === 'Offen').length === 0 && <div className="col-span-full p-20 text-center text-slate-400 font-bold italic bg-white rounded-[2.5rem] border border-slate-100 shadow-xl">Keine offenen Anträge vorhanden.</div>}
               </div>
           </div>
       )}
 
-      {tab === 'schedule' && (
-        <div className="h-[calc(100vh-140px)]"><SchedulePlanner employees={employees} companyId={user.uid} currentUser={user} onViewProfile={handleViewProfile} /></div>
+      {/* TAB: NACHRICHTEN [Einbindung nach Screenshot Design] */}
+      {tab === 'messages' && (
+          <div className="h-[calc(100vh-140px)] animate-in fade-in">
+              <ChatSystem user={user} userRole="provider" isEmbedded={true} />
+          </div>
       )}
 
-      {tab === 'messages' && <div className="h-[calc(100vh-140px)]"><ChatSystem user={user} userRole="provider" isEmbedded={true} /></div>}
-
+      {/* LIGHTBOX (Vollbild-Logo) */}
       {showImageModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4 animate-in fade-in" onClick={() => setShowImageModal(false)}>
-            <div className="relative max-w-4xl w-full h-full flex items-center justify-center text-white">
-                <button className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 p-2 rounded-full backdrop-blur-sm" onClick={() => setShowImageModal(false)}><X size={24} /></button>
-                <img src={data.imageUrl} className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/95 backdrop-blur-2xl p-10 animate-in fade-in" onClick={() => setShowImageModal(false)}>
+            <div className="relative max-w-5xl w-full h-full flex items-center justify-center">
+                <button className="absolute -top-16 right-0 text-white/40 hover:text-white transition-all" onClick={() => setShowImageModal(false)}><X size={48} /></button>
+                <img src={data.imageUrl} className="max-w-full max-h-full object-contain rounded-[3rem] shadow-2xl animate-in zoom-in-95" alt="Logo" />
             </div>
         </div>
       )}
