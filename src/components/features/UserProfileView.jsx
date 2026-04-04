@@ -80,9 +80,8 @@ export const UserProfileView = ({ employee, companyId, onBack }) => {
         </Card>
       ) : (
         <div className="animate-in zoom-in-95">
-          {/* Wir mappen die ID zu UID, damit der Scheduler sie findet */}
           <RosterScheduler 
-            user={{ ...employee, uid: employee.id }} 
+            user={{ ...employee, uid: employee.id, id: employee.id }} 
             companyId={companyId} 
           />
         </div>

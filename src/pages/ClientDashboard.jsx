@@ -9,12 +9,12 @@ import { Button } from '../components/ui/Button';
 import { Avatar } from '../components/ui/Avatar';
 import { ChatSystem } from '../components/features/ChatSystem';
 import { PostItem } from '../components/features/PostItem';
+import { CompanyProfileView } from '../components/features/CompanyProfileView';
 
 export const ClientDashboard = ({ onLogout }) => {
   const [view, setView] = useState('search');
   const [firms, setFirms] = useState([]);
   const [selectedFirm, setSelectedFirm] = useState(null);
-  const [firmPosts, setFirmPosts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -32,17 +32,6 @@ export const ClientDashboard = ({ onLogout }) => {
     };
     loadFirms();
   }, []);
-
-  useEffect(() => {
-    if (selectedFirm) {
-        const loadPosts = async () => {
-            const q = query(collection(db, "companies", selectedFirm.id, "posts"));
-            const snap = await getDocs(q);
-            setFirmPosts(snap.docs.map(d => ({id: d.id, ...d.data()})));
-        };
-        loadPosts();
-    }
-  }, [selectedFirm]);
 
   const handleSaveProfile = async () => {
       if (!auth.currentUser) return;
@@ -99,23 +88,13 @@ export const ClientDashboard = ({ onLogout }) => {
       )}
 
       {view === 'details' && selectedFirm && (
-        <div className="space-y-6 animate-in fade-in">
-          <Button variant="ghost" onClick={() => setSelectedFirm(null)} icon={ArrowLeft} size="sm">Zurück</Button>
-          <Card className="overflow-hidden">
-            <div className="h-32 bg-gradient-to-r from-blue-600 to-blue-400"></div>
-            <div className="px-8 pb-6 -mt-10 flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
-              <div className="flex items-end gap-4"><Avatar src={selectedFirm.imageUrl} alt={selectedFirm.name} size="xl" className="bg-white border-4 border-white shadow-md"/><div className="mb-2"><h1 className="text-2xl font-bold text-slate-900">{selectedFirm.name}</h1><p className="text-slate-500 flex items-center gap-1"><MapPin size={14}/> {selectedFirm.address}</p></div></div>
-              <Button onClick={() => setView('chat')} icon={Mail} className="mb-2">Kontaktieren</Button>
-            </div>
-            <div className="p-8 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-8">
-                <div className="md:col-span-2 space-y-6">
-                    <div><h3 className="font-bold text-slate-900 mb-2">Über uns</h3><p className="text-slate-600 leading-relaxed">{selectedFirm.description || "Keine Beschreibung."}</p></div>
-                    <div><h3 className="font-bold text-slate-900 mb-4">Neuigkeiten</h3>{firmPosts.length > 0 ? firmPosts.map(p => <PostItem key={p.id} post={p} companyId={selectedFirm.id} />) : <div className="text-slate-400 italic">Keine Beiträge.</div>}</div>
-                </div>
-                <div><Card className="p-4 bg-slate-50 border-slate-200"><div className="text-xs font-bold text-slate-500 uppercase mb-1">Stundensatz</div><div className="text-2xl font-bold text-blue-600 mb-4">{selectedFirm.price}€</div></Card></div>
-            </div>
-          </Card>
-        </div>
+        <CompanyProfileView 
+          company={selectedFirm} 
+          onBack={() => setSelectedFirm(null)} 
+          onContactClick={() => setView('chat')}
+          showContactButton={true}
+          currentUser={auth.currentUser}
+        />
       )}
 
       {view === 'chat' && <div className="h-[calc(100vh-140px)]"><ChatSystem user={auth.currentUser} userRole="client" targetId={selectedFirm?.id} targetName={selectedFirm?.name} isEmbedded={true} /></div>}

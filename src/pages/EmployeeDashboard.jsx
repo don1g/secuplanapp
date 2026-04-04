@@ -30,9 +30,11 @@ export const EmployeeDashboard = ({ user, onLogout }) => {
     shirtSize: user?.shirtSize || "L"
   });
 
+  // Update editData when user changes (ohne direktes setState in effect)
   useEffect(() => {
-    if (user) {
-        setEditData({
+    if (user && (user.name !== editData.name || user.phone !== editData.phone)) {
+        setEditData(prev => ({
+            ...prev,
             name: user.name || "",
             bewacherId: user.bewacherId || "",
             birthDate: user.birthDate || "",
@@ -41,9 +43,9 @@ export const EmployeeDashboard = ({ user, onLogout }) => {
             hasLicense: user.hasLicense || "Nein",
             qualification: user.qualification || "",
             shirtSize: user.shirtSize || "L"
-        });
+        }));
     }
-  }, [user]);
+  }, [user?.name, user?.phone, user?.bewacherId, editData.name, editData.phone]);
 
   useEffect(() => {
     if (!user?.companyId || !user?.uid) return;

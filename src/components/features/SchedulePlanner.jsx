@@ -74,22 +74,46 @@ export const SchedulePlanner = ({ employees = [], projects = [], companyId, curr
         return;
     }
 
+    // Doppelbuchungs-Validierung
+    const existingShift = shifts.find(s => 
+      s.employeeId === formData.employeeId && 
+      s.date === formData.date &&
+      s.id !== editingShift?.id
+    );
+    
+    if (existingShift) {
+      const confirm = window.confirm(
+        `${employees.find(e => e.id === formData.employeeId)?.name} hat bereits eine Schicht an diesem Tag.\n\nMöchten Sie trotzdem fortfahren?`
+      );
+      if (!confirm) return;
+    }
+
     const project = projects.find(p => p.id === formData.projectId);
+    const employee = employees.find(e => e.id === formData.employeeId);
     const shiftId = editingShift?.id || `${formData.employeeId}_${formData.date}_${Date.now()}`;
     
     try {
       await setDoc(doc(db, "companies", companyId, "shifts", shiftId), {
         ...formData,
+        employeeName: employee?.name || 'Unbekannt',
         location: project?.name || 'Unbekannt',
         clientName: project?.clientName || 'Privat',
-        // WICHTIG: Chef kann Bestätigung nicht setzen, nur MA
         isConfirmed: editingShift?.isConfirmed || false, 
         updatedAt: new Date().toISOString()
       });
       setIsModalOpen(false);
       setEditingShift(null);
+      setFormData({
+        employeeId: '',
+        projectId: '',
+        date: format(new Date(), 'yyyy-MM-dd'),
+        startTime: '08:00',
+        endTime: '16:00',
+        note: ''
+      });
     } catch (error) {
       console.error("Fehler beim Speichern der Schicht:", error);
+      alert("Fehler beim Speichern der Schicht. Bitte versuchen Sie es erneut.");
     }
   };
 

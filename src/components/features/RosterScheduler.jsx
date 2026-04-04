@@ -17,25 +17,27 @@ import { Avatar } from '../ui/Avatar';
 export const RosterScheduler = ({ user, companyId }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [shifts, setShifts] = useState([]);
-  const [allCompanyShifts, setAllCompanyShifts] = useState([]); // Für die Team-Sicht
+  const [allCompanyShifts, setAllCompanyShifts] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const isOwner = user.uid === (user.id || user.uid); // Prüft ob der MA sein eigenes Profil sieht
+  // Der Mitarbeiter sieht sein eigenes Profil wenn user.uid mit der employeeId übereinstimmt
+  const employeeId = user.id || user.uid;
+  const isOwner = true; // Mitarbeiter sieht immer sein eigenes Profil in diesem Context
 
   useEffect(() => {
-    if (!companyId) return;
+    if (!companyId || !employeeId) return;
 
-    // 1. Alle Schichten der Firma laden (für die Team-Abgleichung)
+    // Alle Schichten der Firma laden
     const unsubAll = onSnapshot(collection(db, "companies", companyId, "shifts"), (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setAllCompanyShifts(data);
-      // 2. Nur die Schichten für diesen spezifischen Mitarbeiter filtern
-      setShifts(data.filter(s => s.employeeId === (user.id || user.uid)));
+      // Nur die Schichten für diesen spezifischen Mitarbeiter filtern
+      setShifts(data.filter(s => s.employeeId === employeeId));
       setLoading(false);
     });
 
     return () => unsubAll();
-  }, [companyId, user.id, user.uid]);
+  }, [companyId, employeeId]);
 
   const days = useMemo(() => eachDayOfInterval({
     start: startOfMonth(currentDate),

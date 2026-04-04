@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Send, Search, Mail, Ban, Trash2, MoreVertical, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, Send, Search, Mail, Ban, Trash2, MoreVertical, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import { collection, query, where, onSnapshot, orderBy, addDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { Avatar } from '../ui/Avatar';
@@ -82,7 +82,13 @@ export const ChatSystem = ({ user, userRole, targetId, targetName, isEmbedded = 
 
   const handleUpdateStatus = async (chatId, status) => {
     await updateDoc(doc(db, "chats", chatId), { status });
-    if (activeChat?.id === chatId) setActiveChat(null);
+    if (status === 'active') {
+      // Bei Freigabe/Wiederherstellung: Chat neu laden
+      const updatedChat = chats.find(c => c.id === chatId);
+      if (updatedChat) setActiveChat({...updatedChat, status: 'active'});
+    } else {
+      if (activeChat?.id === chatId) setActiveChat(null);
+    }
   };
 
   const filteredChats = chats.filter(c => {
@@ -111,7 +117,7 @@ export const ChatSystem = ({ user, userRole, targetId, targetName, isEmbedded = 
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 pb-6 space-y-1">
-          {filteredChats.map(c => (
+          {filteredChats.length > 0 ? filteredChats.map(c => (
             <div key={c.id} onClick={() => setActiveChat(c)} className={`group relative p-4 rounded-[1.25rem] cursor-pointer transition-all ${activeChat?.id === c.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'hover:bg-slate-50'}`}>
               <div className="flex gap-4">
                 <Avatar size="md" alt={userRole === 'client' ? c.companyName : c.clientName} className={activeChat?.id === c.id ? 'border-white/20' : ''} />
@@ -121,10 +127,24 @@ export const ChatSystem = ({ user, userRole, targetId, targetName, isEmbedded = 
                     {((userRole === 'client' && c.unreadClient) || (userRole === 'provider' && c.unreadProvider)) && <div className="h-2.5 w-2.5 bg-blue-500 rounded-full mt-1 border-2 border-white animate-pulse"></div>}
                   </div>
                   <div className={`text-xs truncate ${activeChat?.id === c.id ? 'text-blue-100' : 'text-slate-500'}`}>{c.lastMessage}</div>
+                  {c.status === 'blocked' && (
+                    <div className={`text-[9px] font-black uppercase mt-1 flex items-center gap-1 ${activeChat?.id === c.id ? 'text-red-300' : 'text-red-500'}`}>
+                      <Ban size={10}/> Blockiert
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
-          ))}
+          )) : (
+            <div className="text-center py-12 text-slate-400">
+              <div className="text-sm font-bold mb-1">Keine Chats</div>
+              <div className="text-xs">
+                {view === 'blocked' && 'Keine blockierten Unterhaltungen'}
+                {view === 'deleted' && 'Keine gelöschten Unterhaltungen'}
+                {view === 'active' && 'Noch keine Nachrichten'}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -138,12 +158,32 @@ export const ChatSystem = ({ user, userRole, targetId, targetName, isEmbedded = 
                 <Avatar size="md" alt={userRole === 'client' ? activeChat.companyName : activeChat.clientName} />
                 <div>
                   <div className="font-black text-slate-900 leading-none mb-1">{userRole === 'client' ? activeChat.companyName : activeChat.clientName}</div>
-                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-green-500 uppercase tracking-widest"><div className="h-1.5 w-1.5 bg-green-500 rounded-full animate-pulse"></div> Online</div>
+                  {activeChat.status === 'blocked' ? (
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-red-500 uppercase tracking-widest">
+                      <Ban size={12}/> Blockiert
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-green-500 uppercase tracking-widest">
+                      <div className="h-1.5 w-1.5 bg-green-500 rounded-full animate-pulse"></div> Online
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex gap-2">
-                {activeChat.status !== 'blocked' && <button onClick={() => handleUpdateStatus(activeChat.id, 'blocked')} className="p-2.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all" title="Blockieren"><Ban size={20}/></button>}
-                <button onClick={() => handleUpdateStatus(activeChat.id, 'deleted')} className="p-2.5 text-slate-400 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition-all" title="Löschen"><Trash2 size={20}/></button>
+                {activeChat.status === 'blocked' ? (
+                  <button onClick={() => handleUpdateStatus(activeChat.id, 'active')} className="p-2.5 text-green-500 hover:text-green-600 hover:bg-green-50 rounded-xl transition-all" title="Freigeben">
+                    <CheckCircle2 size={20}/>
+                  </button>
+                ) : activeChat.status === 'deleted' ? (
+                  <button onClick={() => handleUpdateStatus(activeChat.id, 'active')} className="p-2.5 text-blue-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all" title="Wiederherstellen">
+                    <CheckCircle2 size={20}/>
+                  </button>
+                ) : (
+                  <>
+                    <button onClick={() => handleUpdateStatus(activeChat.id, 'blocked')} className="p-2.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all" title="Blockieren"><Ban size={20}/></button>
+                    <button onClick={() => handleUpdateStatus(activeChat.id, 'deleted')} className="p-2.5 text-slate-400 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition-all" title="Löschen"><Trash2 size={20}/></button>
+                  </>
+                )}
               </div>
             </div>
 

@@ -20,6 +20,7 @@ import { SchedulePlanner } from '../components/features/SchedulePlanner';
 import { ChatSystem } from '../components/features/ChatSystem';
 import { PostItem } from '../components/features/PostItem';
 import { UserProfileView } from '../components/features/UserProfileView';
+import { CompanyProfileView } from '../components/features/CompanyProfileView';
 
 export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard' }) => {
   const [tab, setTab] = useState(initialTab);
@@ -132,6 +133,14 @@ export const ProviderDashboard = ({ user, onLogout, initialTab = 'dashboard' }) 
             employee={employees.find(e => e.id === internalProfileId)} 
             companyId={user.uid} 
             onBack={() => setInternalProfileId(null)} 
+          />
+      ) : selectedFirm ? (
+          <CompanyProfileView 
+            company={selectedFirm} 
+            onBack={() => setSelectedFirm(null)} 
+            onContactClick={() => setTab('messages')}
+            showContactButton={true}
+            currentUser={user}
           />
       ) : (
           <div className="max-w-7xl mx-auto space-y-6 pb-24 text-slate-900">
