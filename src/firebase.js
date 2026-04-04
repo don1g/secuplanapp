@@ -4,14 +4,14 @@ import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 
-// HIER DEINE ECHTEN DATEN EINFÜGEN!
+// Firebase Konfiguration aus Umgebungsvariablen laden
 const firebaseConfig = {
-  apiKey: "AIzaSyDKx63fW_Ngy7N_wYmCcr2NRaoIn63uCJg",
-  authDomain: "secuplangemini2.firebaseapp.com",
-  projectId: "secuplangemini2",
-  storageBucket: "secuplangemini2.firebasestorage.app",
-  messagingSenderId: "804459964892",
-  appId: "1:804459964892:web:0679f0e019da07569e8719"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 // App starten (nur EINMAL!)
