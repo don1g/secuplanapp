@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   CalendarDays, FileText, User, Upload, Loader2, Phone, 
-  MapPin, CheckCircle2, X, Plus, Shield, IdCard, Baby, Award, Car 
+  MapPin, CheckCircle2, X, Plus, Shield, IdCard, Baby, Award, Car, Mail 
 } from 'lucide-react';
 import { doc, updateDoc, onSnapshot, query, collection, where, addDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -12,6 +12,7 @@ import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Avatar } from '../components/ui/Avatar';
 import { RosterScheduler } from '../components/features/RosterScheduler';
+import { ChatSystem } from '../components/features/ChatSystem';
 
 export const EmployeeDashboard = ({ user, onLogout }) => {
   const [tab, setTab] = useState('schedule');
@@ -81,6 +82,7 @@ export const EmployeeDashboard = ({ user, onLogout }) => {
   const menu = [
     { id: 'schedule', name: 'Dienstplan', icon: <CalendarDays size={20}/> },
     { id: 'requests', name: 'Anträge', icon: <FileText size={20}/> },
+    { id: 'messages', name: 'Nachrichten', icon: <Mail size={20}/> },
     { id: 'files', name: 'Meine Akte', icon: <User size={20}/> } 
   ];
 
@@ -242,6 +244,13 @@ export const EmployeeDashboard = ({ user, onLogout }) => {
                         </Card>
                     ))}
                 </div>
+            </div>
+        )}
+
+        {/* TAB NACHRICHTEN */}
+        {tab === 'messages' && (
+            <div className="h-[calc(100vh-140px)]">
+                <ChatSystem user={user} userRole="employee" isEmbedded={true} />
             </div>
         )}
       </div>
