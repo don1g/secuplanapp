@@ -1,299 +1,168 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  ChevronLeft, ChevronRight, Clock, Info, 
-  MapPin, User, Shirt, Calendar, Loader2, CheckCircle, Car, Users, FileText, Download 
+  CheckCircle2, Clock, MapPin, Users, Info, 
+  ChevronLeft, ChevronRight, AlertCircle 
 } from 'lucide-react';
 import { 
-  format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, 
-  eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, parseISO, isAfter 
+  format, startOfMonth, endOfMonth, eachDayOfInterval, 
+  isSameDay, addMonths, subMonths, parseISO 
 } from 'date-fns';
 import { de } from 'date-fns/locale';
-import { collection, onSnapshot, doc, updateDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, query, where } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { jsPDF } from "jspdf";
-import autoTable from 'jspdf-autotable';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
-import { Modal } from '../ui/Modal';
+import { Avatar } from '../ui/Avatar';
 
 export const RosterScheduler = ({ user, companyId }) => {
-  const [date, setDate] = useState(new Date());
+  const [currentDate, setCurrentDate] = useState(new Date());
   const [shifts, setShifts] = useState([]);
-  const [allShifts, setAllShifts] = useState([]);
-  const [selectedShift, setSelectedShift] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [allCompanyShifts, setAllCompanyShifts] = useState([]); // Für die Team-Sicht
+  const [loading, setLoading] = useState(true);
+
+  const isOwner = user.uid === (user.id || user.uid); // Prüft ob der MA sein eigenes Profil sieht
 
   useEffect(() => {
-    if (!companyId || !user?.uid) return;
-    setIsLoading(true);
-    
-    const unsub = onSnapshot(collection(db, "companies", companyId, "shifts"), (snap) => {
-        const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setAllShifts(data);
-        setShifts(data.filter(s => s.employeeId === user.uid));
-        setIsLoading(false);
+    if (!companyId) return;
+
+    // 1. Alle Schichten der Firma laden (für die Team-Abgleichung)
+    const unsubAll = onSnapshot(collection(db, "companies", companyId, "shifts"), (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setAllCompanyShifts(data);
+      // 2. Nur die Schichten für diesen spezifischen Mitarbeiter filtern
+      setShifts(data.filter(s => s.employeeId === (user.id || user.uid)));
+      setLoading(false);
     });
 
-    return () => unsub();
-  }, [companyId, user?.uid]);
+    return () => unsubAll();
+  }, [companyId, user.id, user.uid]);
 
-  // --- BERECHNUNGSLOGIK FÜR PDF & DASHBOARD ---
+  const days = useMemo(() => eachDayOfInterval({
+    start: startOfMonth(currentDate),
+    end: endOfMonth(currentDate)
+  }), [currentDate]);
 
-  const getShiftIntervals = (s) => {
-    const start = new Date(s.date + 'T' + s.startTime);
-    let end = new Date(s.date + 'T' + s.endTime);
-    if (end < start) end.setDate(end.getDate() + 1);
-    return { start, end };
-  };
-
-  const calculateTotalHours = (start, end) => (end - start) / (1000 * 60 * 60);
-
-  const calculateNightHours = (start, end) => {
-    let nightMin = 0;
-    let curr = new Date(start);
-    while (curr < end) {
-      const h = curr.getHours();
-      if (h >= 22 || h < 6) nightMin++; 
-      curr.setMinutes(curr.getMinutes() + 1);
+  const handleConfirm = async (shiftId) => {
+    try {
+      await updateDoc(doc(db, "companies", companyId, "shifts", shiftId), {
+        isConfirmed: true,
+        confirmedAt: new Date().toISOString()
+      });
+    } catch (e) {
+      console.error("Fehler bei Bestätigung:", e);
     }
-    return nightMin / 60;
   };
 
-  const calculateSundayHours = (start, end) => {
-    let sunMin = 0;
-    let curr = new Date(start);
-    while (curr < end) {
-      if (curr.getDay() === 0) sunMin++;
-      curr.setMinutes(curr.getMinutes() + 1);
-    }
-    return sunMin / 60;
+  // Findet heraus, wer noch an diesem Tag im selben Objekt ist
+  const getTeamMembers = (date, projectId, currentShiftId) => {
+    return allCompanyShifts.filter(s => 
+      s.date === date && 
+      s.projectId === projectId && 
+      s.id !== currentShiftId &&
+      s.isConfirmed === true // Man sieht das Team erst, wenn man selbst & die anderen bestätigt sind (oder nach deiner Vorgabe: sobald man selbst bestätigt ist)
+    );
   };
 
-  // --- PDF EXPORT (MATCHING THE SAMPLE PDF) ---
-
-  const exportMonthlyPDF = () => {
-    const pdf = new jsPDF('landscape', 'mm', 'a4');
-    const monthTitle = format(date, 'MMMM yyyy', { locale: de });
-    const now = new Date();
-    
-    // Header Sektion
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(16);
-    pdf.text(`Offizielle Abrechnungsübersicht: ${monthTitle}`, 14, 15);
-    
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(10);
-    pdf.text(`Mitarbeiter: ${user.name}`, 14, 22);
-    pdf.text(`Status: Nur bestätigte und abgeschlossene Einsätze`, 14, 27);
-
-    // Daten filtern: Nur bestätigte & vergangen
-    const monthlyShifts = shifts.filter(s => {
-        if (!isSameMonth(parseISO(s.date), date) || !s.isConfirmed) return false;
-        const { end } = getShiftIntervals(s);
-        return isAfter(now, end);
-    }).sort((a, b) => a.date.localeCompare(b.date));
-
-    const tableData = monthlyShifts.map(s => {
-      const { start, end } = getShiftIntervals(s);
-      const total = calculateTotalHours(start, end);
-      const night = calculateNightHours(start, end);
-      const sunday = calculateSundayHours(start, end);
-      
-      // Datumsformatierung wie im Beispiel: 01.04. (Mi.)
-      const dayName = format(start, 'EEE', { locale: de });
-      const formattedDate = `${format(start, 'dd.MM.')} (${dayName}.)`;
-
-      return [
-        formattedDate,
-        s.location,
-        `${s.startTime}-${s.endTime}`,
-        total.toFixed(2) + ' h',
-        night > 0 ? night.toFixed(2) + ' h' : '',
-        sunday > 0 ? sunday.toFixed(2) + ' h' : '',
-        '' // Feiertag (Platzhalter)
-      ];
-    });
-
-    const totalSum = tableData.reduce((acc, row) => acc + parseFloat(row[3]), 0);
-
-    autoTable(pdf, {
-      head: [['Datum', 'Einsatzort', 'Zeitraum', 'Gesamt', 'Nacht (22-06)', 'Sonntag', 'Feiertag']],
-      body: tableData,
-      startY: 32,
-      theme: 'grid', // Sauberer Gitter-Look wie im Beispiel
-      styles: { fontSize: 8, cellPadding: 2, textColor: [0, 0, 0], lineColor: [200, 200, 200] },
-      headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold', halign: 'left' },
-      columnStyles: { 
-          0: { cellWidth: 35 },
-          3: { halign: 'right', fontStyle: 'bold' },
-          4: { halign: 'right' },
-          5: { halign: 'right' },
-          6: { halign: 'right' }
-      },
-      foot: [['', '', 'ABGERECHNETE SUMME', totalSum.toFixed(2) + ' h', '', '', '']],
-      footStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], fontStyle: 'bold', halign: 'right' }
-    });
-
-    pdf.save(`Abrechnung_${user.name}_${monthTitle}.pdf`);
-  };
-
-  const totalConfirmedPastHours = useMemo(() => {
-    const now = new Date();
-    return shifts.filter(s => {
-        if (!isSameMonth(parseISO(s.date), date) || !s.isConfirmed) return false;
-        const { end } = getShiftIntervals(s);
-        return isAfter(now, end);
-    }).reduce((sum, s) => {
-        const { start, end } = getShiftIntervals(s);
-        return sum + calculateTotalHours(start, end);
-    }, 0);
-  }, [shifts, date]);
-
-  const days = eachDayOfInterval({ 
-    start: startOfWeek(startOfMonth(date), { weekStartsOn: 1 }), 
-    end: endOfWeek(endOfMonth(date), { weekStartsOn: 1 }) 
-  });
-  
   return (
-    <div className="space-y-4 animate-in fade-in duration-500 pb-10">
+    <div className="space-y-4 animate-in fade-in">
       
-      {/* HEADER NAVIGATION */}
-      <Card className="p-4 flex flex-col sm:flex-row items-center justify-between gap-4 bg-white shadow-xl rounded-[2rem] border-slate-100">
-        <div className="flex items-center bg-slate-50 p-1.5 rounded-2xl border border-slate-100 w-full sm:w-auto">
-          <button onClick={() => setDate(subMonths(date, 1))} className="p-2 hover:bg-white rounded-xl transition-all text-slate-400 hover:text-blue-600"><ChevronLeft size={20}/></button>
-          
-          <div className="flex items-center gap-3 px-4 flex-1 justify-center">
-              <span className="text-xs font-black text-slate-900 capitalize whitespace-nowrap">
-                {format(date, 'MMMM yyyy', { locale: de })}
-              </span>
-              <div className="flex items-center gap-1.5 bg-blue-600 text-white px-2.5 py-1 rounded-xl shadow-sm">
-                <Clock size={10}/>
-                <span className="text-[10px] font-black uppercase tracking-widest">
-                  {totalConfirmedPastHours.toFixed(2)}h
-                </span>
-              </div>
-          </div>
-
-          <button onClick={() => setDate(addMonths(date, 1))} className="p-2 hover:bg-white rounded-xl transition-all text-slate-400 hover:text-blue-600"><ChevronRight size={20}/></button>
+      {/* MONATS-NAV */}
+      <div className="flex items-center justify-between bg-white p-4 rounded-xl border border-slate-200">
+        <div className="flex items-center gap-4">
+          <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="p-2 hover:bg-slate-50 rounded-lg"><ChevronLeft size={20}/></button>
+          <span className="text-sm font-bold uppercase tracking-widest text-slate-900">{format(currentDate, 'MMMM yyyy', { locale: de })}</span>
+          <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="p-2 hover:bg-slate-50 rounded-lg"><ChevronRight size={20}/></button>
         </div>
+        <div className="text-[10px] font-black uppercase text-slate-400">Mein Dienstplan</div>
+      </div>
 
-        <button 
-          onClick={exportMonthlyPDF}
-          className="w-full sm:w-auto bg-slate-900 hover:bg-blue-600 text-white px-6 py-3 rounded-2xl transition-all font-black text-[10px] uppercase tracking-[0.15em] flex items-center justify-center gap-2 shadow-xl"
-        >
-          <Download size={14}/> Abrechnung PDF
-        </button>
-      </Card>
-      
-      {/* KALENDER GRID */}
-      <Card className="overflow-hidden bg-white rounded-[2.5rem] shadow-2xl border-slate-100">
-        <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50/50">
-            {['Mo','Di','Mi','Do','Fr','Sa','So'].map(d => (
-              <div key={d} className={`py-4 text-center text-[10px] font-black uppercase tracking-[0.2em] ${d === 'So' ? 'text-red-500' : 'text-slate-400'}`}>{d}</div>
-            ))}
-        </div>
-        <div className="grid grid-cols-7 auto-rows-fr bg-slate-100/30 gap-px">
-          {days.map(d => {
-            const dStr = format(d, 'yyyy-MM-dd');
-            const dayShifts = shifts.filter(s => s.date === dStr);
-            const isToday = isSameDay(d, new Date());
-            const isSunday = d.getDay() === 0;
+      {/* KALENDER-MATRIX */}
+      <Card className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-slate-50 border-b-2 border-slate-200">
+                {days.map(day => (
+                  <th key={day.toString()} className={`p-4 border-r border-slate-200 min-w-[140px] text-center ${format(day, 'E') === 'So' ? 'bg-red-50/50' : ''}`}>
+                    <div className="text-[8px] font-bold text-slate-400 uppercase">{format(day, 'EEEEEE', { locale: de })}</div>
+                    <div className="text-sm font-black text-slate-900">{format(day, 'dd')}</div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                {days.map(day => {
+                  const dStr = format(day, 'yyyy-MM-dd');
+                  const dayShifts = shifts.filter(s => s.date === dStr);
 
-            return (
-              <div key={dStr} className={`bg-white p-2 min-h-[120px] ${!isSameMonth(d, date) ? 'opacity-30' : ''}`}>
-                <div className="flex justify-between items-start mb-2">
-                    <div className={`text-[11px] font-black w-7 h-7 flex items-center justify-center rounded-xl mb-1 ${isToday ? 'bg-blue-600 text-white shadow-lg' : isSunday ? 'text-red-500 bg-red-50' : 'text-slate-400'}`}>
-                        {format(d, 'd')}
-                    </div>
-                </div>
-                <div className="space-y-1.5">
-                  {dayShifts.map((s, i) => (
-                    <div key={i} onClick={() => setSelectedShift(s)} className={`${s.isConfirmed ? 'bg-green-50 text-green-700 border-green-100' : 'bg-blue-50 text-blue-700 border-blue-100'} text-[8px] font-bold rounded-xl p-2 border cursor-pointer hover:scale-105 transition-all shadow-sm overflow-hidden`}>
-                        <div className="flex justify-between items-center mb-0.5">
-                            <span className="truncate">{s.startTime}-{s.endTime}</span>
-                            {s.isConfirmed && <CheckCircle size={10}/>}
-                        </div>
-                        <div className="opacity-70 truncate border-t border-current/10 pt-1 leading-tight">{s.location}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
+                  return (
+                    <td key={day.toString()} className={`p-2 border-r border-slate-200 align-top min-h-[150px] ${format(day, 'E') === 'So' ? 'bg-red-50/20' : ''}`}>
+                      <div className="space-y-3">
+                        {dayShifts.map(s => {
+                          const team = getTeamMembers(s.date, s.projectId, s.id);
+                          
+                          return (
+                            <div key={s.id} className={`p-3 rounded-xl border-2 transition-all ${s.isConfirmed ? 'border-green-500 bg-green-50/30' : 'border-blue-200 bg-blue-50/30'}`}>
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="text-xs font-black text-slate-900 flex items-center gap-1">
+                                  <Clock size={12} className="text-blue-500"/> {s.startTime} - {s.endTime}
+                                </div>
+                                {s.isConfirmed && <CheckCircle2 size={14} className="text-green-600"/>}
+                              </div>
+                              
+                              <div className="text-[10px] font-bold text-slate-600 mb-3 flex items-center gap-1">
+                                <MapPin size={12} className="text-slate-400"/> {s.location}
+                              </div>
 
-      {/* DETAIL MODAL (BLEIBT GLEICH) */}
-      {selectedShift && (
-        <Modal title="Einsatz-Details" onClose={() => setSelectedShift(null)}>
-            <div className="space-y-6 max-h-[85vh] overflow-y-auto pr-1 text-slate-900">
-                <div className={`p-6 rounded-[2rem] flex items-center justify-between text-white shadow-2xl ${selectedShift.isConfirmed ? 'bg-green-600' : 'bg-blue-600'}`}>
-                    <div className="flex items-center gap-5">
-                        <div className="p-4 bg-white/20 rounded-2xl shadow-inner"><Clock size={28}/></div>
-                        <div>
-                            <div className="text-[10px] font-black opacity-70 uppercase tracking-widest mb-1">Einsatzzeit</div>
-                            <div className="font-black text-xl">{format(new Date(selectedShift.date), 'EEEE, dd.MM.yyyy', { locale: de })}</div>
-                            <div className="text-md font-bold opacity-90">{selectedShift.startTime} - {selectedShift.endTime} Uhr</div>
-                        </div>
-                    </div>
-                </div>
+                              {/* BESTÄTIGUNGS-BUTTON (Nur für den Inhaber sichtbar & wenn noch nicht bestätigt) */}
+                              {!s.isConfirmed && isOwner && (
+                                <button 
+                                  onClick={() => handleConfirm(s.id)}
+                                  className="w-full py-2 bg-blue-600 text-white rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-blue-700 shadow-md transition-all"
+                                >
+                                  Dienst bestätigen
+                                </button>
+                              )}
 
-                {!selectedShift.isConfirmed && (
-                    <button 
-                      className="w-full bg-green-600 hover:bg-green-700 text-white py-5 rounded-2xl font-black uppercase text-xs tracking-[0.2em] shadow-2xl" 
-                      onClick={async () => {
-                          await updateDoc(doc(db, "companies", companyId, "shifts", selectedShift.id), { isConfirmed: true });
-                          setSelectedShift(prev => ({...prev, isConfirmed: true}));
-                      }}
-                    >
-                      Dienst jetzt Bestätigen
-                    </button>
-                )}
-
-                <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 space-y-8">
-                    <div className="flex gap-5">
-                      <MapPin size={24} className="text-blue-600 shrink-0 mt-1"/>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Einsatzort</div>
-                        <div className="text-lg font-black uppercase leading-tight text-slate-900">{selectedShift.location}</div>
-                        <div className="text-xs font-medium text-slate-500 mt-1">{selectedShift.objectAddress || "Keine Adresse hinterlegt"}</div>
+                              {/* TEAM-SICHT (Nur nach Bestätigung) */}
+                              {s.isConfirmed && (
+                                <div className="mt-3 pt-3 border-t border-green-200">
+                                  <div className="text-[8px] font-black uppercase text-green-700 mb-2 flex items-center gap-1">
+                                    <Users size={10}/> Team vor Ort:
+                                  </div>
+                                  <div className="flex flex-col gap-1">
+                                    {team.length > 0 ? team.map(member => (
+                                      <div key={member.id} className="flex items-center gap-2 text-[9px] font-bold text-slate-700 bg-white/50 p-1 rounded-md">
+                                        <div className="w-4 h-4 rounded-full bg-blue-100 flex items-center justify-center text-[7px]">{member.employeeName?.charAt(0)}</div>
+                                        {member.employeeName}
+                                      </div>
+                                    )) : (
+                                      <div className="text-[8px] italic text-slate-400">Allein-Dienst</div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {!dayShifts.length && <div className="h-20 flex items-center justify-center text-[8px] text-slate-200 font-bold uppercase tracking-tighter italic">Kein Dienst</div>}
                       </div>
-                    </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </Card>
 
-                    <div className="grid grid-cols-2 gap-6">
-                        <div className="bg-white p-4 rounded-2xl border border-slate-100 text-center shadow-sm">
-                            <div className="text-[10px] font-black text-slate-400 uppercase mb-2 tracking-widest flex items-center justify-center gap-2"><Car size={14}/> Fahrer</div>
-                            <div className={`text-xs font-black uppercase ${selectedShift.isDriver ? 'text-blue-600' : 'text-slate-400 italic'}`}>
-                                {selectedShift.isDriver ? "Aktiv" : "Nein"}
-                            </div>
-                        </div>
-                        <div className="bg-white p-4 rounded-2xl border border-slate-100 text-center shadow-sm">
-                            <div className="text-[10px] font-black text-slate-400 uppercase mb-2 tracking-widest flex items-center justify-center gap-2"><Shirt size={14}/> Kleidung</div>
-                            <div className="text-xs font-black uppercase text-slate-800">{selectedShift.uniform || "Standard"}</div>
-                        </div>
-                    </div>
-
-                    <div className="space-y-6">
-                        <div className="flex items-start gap-4">
-                            <div className="p-3 bg-blue-50 rounded-xl text-blue-600 shadow-sm"><User size={20}/></div>
-                            <div className="flex-1">
-                                <div className="text-[10px] font-black text-slate-400 uppercase mb-1">Ansprechpartner</div>
-                                <div className="text-sm font-bold">{selectedShift.contactPerson || "Keine Angabe"}</div>
-                            </div>
-                        </div>
-                        <div className="flex items-start gap-4">
-                            <div className="p-3 bg-blue-50 rounded-xl text-blue-600 shadow-sm"><Info size={20}/></div>
-                            <div className="flex-1">
-                                <div className="text-[10px] font-black text-slate-400 uppercase mb-1">Parken / Anfahrt</div>
-                                <div className="text-sm font-bold">{selectedShift.parkingInfo || "Keine Angabe"}</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <Button className="w-full py-5 text-slate-400 font-black uppercase text-[10px] tracking-widest hover:text-slate-600" variant="ghost" onClick={() => setSelectedShift(null)}>Schließen</Button>
-            </div>
-        </Modal>
-      )}
+      <div className="flex items-center gap-2 p-4 bg-blue-50 rounded-xl border border-blue-100">
+        <Info size={16} className="text-blue-500 shrink-0"/>
+        <p className="text-[10px] text-blue-700 font-medium leading-relaxed">
+          Bestätige deine Dienste rechtzeitig. Sobald ein Dienst bestätigt ist, siehst du deine Kollegen im Objekt.
+        </p>
+      </div>
     </div>
   );
 };
